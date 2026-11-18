@@ -51,6 +51,8 @@ app.use(helmet({
     },
   },
   crossOriginEmbedderPolicy: false,
+  // YouTube/Vimeo embeds need to see the site's address (fixes YouTube "Error 153")
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
   hsts: PROD,
 }));
 app.use(compression());
@@ -76,7 +78,7 @@ app.use((req, _res, next) => {
   if (t) {
     try {
       const p = jwt.verify(t, SECRET);
-      const u = db.prepare('SELECT id,name,email,role,status,bio,color FROM users WHERE id=?').get(p.id);
+      const u = db.prepare('SELECT id,name,email,role,status,bio,color,avatar,headline,location,website FROM users WHERE id=?').get(p.id);
       if (u && u.status === 'active') req.user = u;
     } catch { /* invalid token */ }
   }
@@ -88,9 +90,11 @@ const need = (...roles) => (req, res, next) => {
   next();
 };
 const isStaff = u => u && (u.role === 'admin' || u.role === 'eic');
+const limits = () => getSetting('limits', {});
+const LIMIT_RULES = { imgMaxMB: [0.1, 50], imgMaxWidth: [200, 6000], imgQuality: [40, 100], avatarSize: [100, 1000], videoMaxMB: [1, 2048], audioMaxMB: [1, 500] };
 
 /* ---------------- article shaping ---------------- */
-const ART_SELECT = `SELECT a.*, u.name AS author_name, u.color AS author_color,
+const ART_SELECT = `SELECT a.*, u.name AS author_name, u.color AS author_color, u.avatar AS author_avatar, u.headline AS author_headline,
   (SELECT COUNT(*) FROM comments c WHERE c.article_id=a.id AND c.status='approved') AS comment_count,
   (SELECT AVG(stars) FROM comments c WHERE c.article_id=a.id AND c.status='approved' AND stars>0) AS rating,
   (SELECT COUNT(*) FROM comments c WHERE c.article_id=a.id AND c.status='approved' AND stars>0) AS rating_n
@@ -100,7 +104,7 @@ function out(a, full = false) {
   const o = {
     id: a.id, slug: a.slug, title: a.title, excerpt: a.excerpt, category: a.category, tags: a.tags,
     cover: a.cover, video: a.video_src ? { type: a.video_type, src: a.video_src } : null, audio: a.audio,
-    authorId: a.author_id, authorName: a.author_name, authorColor: a.author_color,
+    authorId: a.author_id, authorName: a.author_name, authorColor: a.author_color, authorAvatar: a.author_avatar || null, authorHeadline: a.author_headline || '',
     status: a.status, featured: !!a.featured, breaking: !!a.breaking, views: a.views,
     comments: a.comment_count || 0, rating: a.rating || 0, ratingN: a.rating_n || 0,
     createdAt: a.created_at, publishedAt: a.published_at, submittedAt: a.submitted_at, editorNote: a.editor_note,
@@ -114,7 +118,7 @@ const PUB = `a.status='published'`;
 /* ---------------- contributor scores ---------------- */
 const TIERS = [[400, 'Platinum', '#0891b2'], [150, 'Gold', '#ca8a04'], [50, 'Silver', '#64748b'], [0, 'Bronze', '#b45309']];
 function contributorStats(userId) {
-  const q = `SELECT u.id,u.name,u.color,u.role,u.bio,
+  const q = `SELECT u.id,u.name,u.color,u.role,u.bio,u.avatar,u.headline,u.location,u.website,
    (SELECT COUNT(*) FROM articles a WHERE a.author_id=u.id AND ${PUB}) stories,
    (SELECT COALESCE(SUM(views),0) FROM articles a WHERE a.author_id=u.id AND ${PUB}) views,
    (SELECT COUNT(*) FROM comments c JOIN articles a ON a.id=c.article_id WHERE a.author_id=u.id AND ${PUB} AND c.status='approved') comments,
@@ -151,6 +155,7 @@ app.get('/api/boot', (req, res) => {
     breaking: getSetting('breaking', { active: false }),
     weather: { cities: db.prepare('SELECT city,temp,cond,hum,wind,updated_at FROM weather ORDER BY sort,id').all(), alerts: getSetting('alerts', []) },
     vapidKey: pushReady ? process.env.VAPID_PUBLIC_KEY : null,
+    limits: limits(),
   });
 });
 
@@ -224,7 +229,7 @@ app.post('/api/articles/:id/comments', commentLimiter, (req, res) => {
 
 app.get('/api/events', (req, res) => res.json(db.prepare('SELECT * FROM events ORDER BY date').all()));
 app.get('/api/contributors', (req, res) => res.json(ranked()));
-app.get('/api/ads', (req, res) => res.json(db.prepare(`SELECT id,advertiser,title,text,placement,color,image FROM ads WHERE active=1 AND (ends_on IS NULL OR ends_on='' OR ends_on >= date('now'))`).all()));
+app.get('/api/ads', (req, res) => res.json(db.prepare(`SELECT id,advertiser,title,text,placement,color,image FROM ads WHERE active=1 AND (ends_on IS NULL OR ends_on='' OR ends_on >= date('now')) AND (starts_on IS NULL OR starts_on='' OR starts_on <= date('now'))`).all()));
 app.post('/api/ads/impressions', (req, res) => {
   const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).slice(0, 6).map(Number).filter(Boolean);
   const st = db.prepare('UPDATE ads SET impressions=impressions+1 WHERE id=?');
@@ -267,7 +272,7 @@ app.post('/api/auth/apply', loginLimiter, (req, res) => {
   if (db.prepare('SELECT 1 FROM users WHERE email=?').get(email)) return bad(res, 'An account with this email already exists');
   const n = db.prepare('SELECT COUNT(*) n FROM users').get().n;
   db.prepare('INSERT INTO users(name,email,password_hash,role,status,bio,color,created_at) VALUES(?,?,?,?,?,?,?,?)')
-    .run(name, email, bcrypt.hashSync(pass, 10), 'contributor', 'pending', str(req.body.bio, 300), COLORS[n % COLORS.length], now());
+    .run(name, email, bcrypt.hashSync(pass, 10), 'contributor', 'pending', str(req.body.bio, 2000), COLORS[n % COLORS.length], now());
   res.json({ ok: true });
 });
 app.post('/api/auth/password', need(), (req, res) => {
@@ -277,15 +282,25 @@ app.post('/api/auth/password', need(), (req, res) => {
   db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(String(req.body.next), 10), req.user.id);
   res.json({ ok: true });
 });
-app.put('/api/me', need(), (req, res) => {
-  db.prepare('UPDATE users SET name=?, bio=? WHERE id=?').run(str(req.body.name, 80) || req.user.name, str(req.body.bio, 300), req.user.id);
-  res.json({ ok: true });
+function saveProfile(id, b, fallbackName) {
+  const site = str(b.website, 300);
+  db.prepare('UPDATE users SET name=?, headline=?, bio=?, location=?, website=?, avatar=? WHERE id=?').run(
+    str(b.name, 80) || fallbackName, str(b.headline, 120), str(b.bio, 2000), str(b.location, 80),
+    site && !/^https?:\/\//i.test(site) ? 'https://' + site : site, localUrl(b.avatar), id);
+}
+app.put('/api/me', need(), (req, res) => { saveProfile(req.user.id, req.body, req.user.name); res.json({ ok: true }); });
+app.get('/api/authors/:id', (req, res) => {
+  const u = db.prepare(`SELECT id,name,role,bio,color,avatar,headline,location,website,created_at FROM users WHERE id=? AND status='active'`).get(+req.params.id);
+  if (!u) return bad(res, 'Profile not found', 404);
+  const all = ranked(), st = contributorStats(u.id)[0];
+  res.json({ ...u, stats: st, rank: all.findIndex(r => r.id === u.id) + 1, of: all.length,
+    articles: db.prepare(`${ART_SELECT} WHERE ${PUB} AND a.author_id=? ORDER BY a.published_at DESC LIMIT 60`).all(u.id).map(a => out(a)) });
 });
 
 /* ================= UPLOADS ================= */
 const UP_DIR = path.join(__dirname, 'uploads');
-const LIMITS = { image: 8e6, video: 250e6, audio: 40e6 };
-const upload = multer({
+const maxBytes = kind => { const L = limits(); return (kind === 'video' ? L.videoMaxMB : kind === 'audio' ? L.audioMaxMB : L.imgMaxMB) * 1e6; };
+const makeUpload = kind => multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       const d = new Date(), dir = path.join(UP_DIR, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, '0'));
@@ -293,27 +308,32 @@ const upload = multer({
     },
     filename: (req, file, cb) => cb(null, crypto.randomBytes(10).toString('hex') + path.extname(file.originalname).toLowerCase().replace(/[^.\w]/g, '').slice(0, 6)),
   }),
-  limits: { fileSize: LIMITS.video },
+  limits: { fileSize: Math.ceil(maxBytes(kind)) },
   fileFilter: (req, file, cb) => {
     const kind = req.query.kind;
-    const ok = (kind === 'image' && /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) ||
+    const ok = ((kind === 'image' || kind === 'avatar') && /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) ||
       (kind === 'video' && /^video\/(mp4|webm|quicktime)$/.test(file.mimetype)) ||
       (kind === 'audio' && /^audio\//.test(file.mimetype));
     cb(ok ? null : new Error('That file type is not allowed here'), ok);
   },
 });
 app.post('/api/upload', need(), (req, res) => {
-  upload.single('file')(req, res, async err => {
-    if (err) return bad(res, err.code === 'LIMIT_FILE_SIZE' ? 'File is too large' : err.message);
+  const kind = req.query.kind;
+  if (!['image', 'avatar', 'video', 'audio'].includes(kind)) return bad(res, 'Unknown upload type');
+  makeUpload(kind).single('file')(req, res, async err => {
+    if (err) return bad(res, err.code === 'LIMIT_FILE_SIZE' ? `File is too large — the limit is ${+(maxBytes(kind) / 1e6).toFixed(1)} MB` : err.message);
     if (!req.file) return bad(res, 'No file received');
-    const kind = req.query.kind;
-    if (req.file.size > LIMITS[kind]) { fs.unlinkSync(req.file.path); return bad(res, `File is too large (max ${LIMITS[kind] / 1e6} MB)`); }
+    const L = limits();
     let file = req.file.path;
-    if (kind === 'image' && sharp && !/\.gif$/.test(file)) {
+    if ((kind === 'image' || kind === 'avatar') && sharp && !/\.gif$/.test(file)) {
       try {
-        const outPath = file.replace(/\.[^.]+$/, '') + '.webp';
-        await sharp(file).rotate().resize({ width: 1600, withoutEnlargement: true }).webp({ quality: 80 }).toFile(outPath);
-        if (outPath !== file) fs.unlinkSync(file);
+        const outPath = file.replace(/\.[^.]+$/, '') + (file.endsWith('.webp') ? '-o' : '') + '.webp';
+        let img = sharp(file).rotate();
+        img = kind === 'avatar'
+          ? img.resize({ width: L.avatarSize, height: L.avatarSize, fit: 'cover', position: 'attention' })
+          : img.resize({ width: L.imgMaxWidth, height: L.imgMaxWidth, fit: 'inside', withoutEnlargement: true });
+        await img.webp({ quality: L.imgQuality }).toFile(outPath);
+        fs.unlinkSync(file);
         file = outPath;
       } catch (e) { console.warn('image optimise failed:', e.message); }
     }
@@ -499,7 +519,7 @@ app.get('/api/admin/counts', staffOnly, (req, res) => {
 
 app.get('/api/admin/users', adminOnly, (req, res) => {
   const stats = Object.fromEntries(contributorStats().map(s => [s.id, s.score]));
-  res.json(db.prepare('SELECT id,name,email,role,status,bio,color,created_at FROM users ORDER BY CASE status WHEN \'pending\' THEN 0 ELSE 1 END, created_at DESC').all()
+  res.json(db.prepare('SELECT id,name,email,role,status,bio,color,avatar,headline,location,website,created_at FROM users ORDER BY CASE status WHEN \'pending\' THEN 0 ELSE 1 END, created_at DESC').all()
     .map(u => ({ ...u, score: stats[u.id] || 0 })));
 });
 app.post('/api/admin/users', adminOnly, (req, res) => {
@@ -510,7 +530,8 @@ app.post('/api/admin/users', adminOnly, (req, res) => {
   const temp = crypto.randomBytes(5).toString('hex');
   const n = db.prepare('SELECT COUNT(*) n FROM users').get().n;
   db.prepare('INSERT INTO users(name,email,password_hash,role,status,bio,color,created_at) VALUES(?,?,?,?,?,?,?,?)')
-    .run(name, email, bcrypt.hashSync(temp, 10), role, 'active', str(req.body.bio, 300), COLORS[n % COLORS.length], now());
+    .run(name, email, bcrypt.hashSync(temp, 10), role, 'active', str(req.body.bio, 2000), COLORS[n % COLORS.length], now());
+  db.prepare('UPDATE users SET headline=? WHERE email=?').run(str(req.body.headline, 120), email);
   res.json({ ok: true, tempPassword: temp });
 });
 app.put('/api/admin/users/:id', adminOnly, (req, res) => {
@@ -520,6 +541,7 @@ app.put('/api/admin/users/:id', adminOnly, (req, res) => {
   if (id === req.user.id && (req.body.role || req.body.status)) return bad(res, 'You cannot change your own role or status');
   if (req.body.role && ['admin', 'eic', 'contributor'].includes(req.body.role)) db.prepare('UPDATE users SET role=? WHERE id=?').run(req.body.role, id);
   if (req.body.status && ['active', 'suspended'].includes(req.body.status)) db.prepare('UPDATE users SET status=? WHERE id=?').run(req.body.status, id);
+  if (req.body.profile) saveProfile(id, req.body.profile, u.name);
   if (req.body.resetPassword) {
     const temp = crypto.randomBytes(5).toString('hex');
     db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(temp, 10), id);
@@ -536,18 +558,43 @@ app.delete('/api/admin/users/:id', adminOnly, (req, res) => {
 });
 
 app.get('/api/admin/ads', adminOnly, (req, res) => res.json(db.prepare('SELECT * FROM ads ORDER BY created_at DESC').all()));
+function adFields(b) {
+  const link = str(b.link, 500), d = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null;
+  return {
+    advertiser: str(b.advertiser, 120), title: str(b.title, 120), text: str(b.text, 200), link: isUrl(link) ? link : '',
+    placement: ['top', 'sidebar', 'inline'].includes(b.placement) ? b.placement : 'sidebar',
+    color: /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : '#fe5800', image: localUrl(b.image),
+    active: b.active === undefined ? 1 : (b.active && b.active !== '0' && b.active !== 'false' ? 1 : 0),
+    starts_on: d(b.startsOn), ends_on: d(b.endsOn),
+  };
+}
 app.post('/api/admin/ads', adminOnly, (req, res) => {
-  const b = req.body, title = str(b.title, 120), advertiser = str(b.advertiser, 120);
-  if (!title || !advertiser) return bad(res, 'Advertiser and headline are required');
-  const link = str(b.link, 500);
-  db.prepare('INSERT INTO ads(advertiser,title,text,link,placement,color,image,active,ends_on,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run(advertiser, title, str(b.text, 200), isUrl(link) ? link : '', ['top', 'sidebar', 'inline'].includes(b.placement) ? b.placement : 'sidebar',
-      /^#[0-9a-f]{6}$/i.test(b.color) ? b.color : '#f26a1b', localUrl(b.image), 1, /^\d{4}-\d{2}-\d{2}$/.test(b.endsOn || '') ? b.endsOn : null, now());
-  res.json({ ok: true });
+  const f = adFields(req.body);
+  if (!f.title || !f.advertiser) return bad(res, 'Advertiser and headline are required');
+  const r = db.prepare('INSERT INTO ads(advertiser,title,text,link,placement,color,image,active,starts_on,ends_on,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(f.advertiser, f.title, f.text, f.link, f.placement, f.color, f.image, f.active, f.starts_on, f.ends_on, now());
+  res.json({ ok: true, id: r.lastInsertRowid });
 });
 app.put('/api/admin/ads/:id', adminOnly, (req, res) => {
-  if (typeof req.body.active === 'boolean') db.prepare('UPDATE ads SET active=? WHERE id=?').run(req.body.active ? 1 : 0, +req.params.id);
+  const id = +req.params.id;
+  if (!db.prepare('SELECT 1 FROM ads WHERE id=?').get(id)) return bad(res, 'Advert not found', 404);
+  if (Object.keys(req.body).length === 1 && typeof req.body.active === 'boolean') {
+    db.prepare('UPDATE ads SET active=? WHERE id=?').run(req.body.active ? 1 : 0, id);
+    return res.json({ ok: true });
+  }
+  const f = adFields(req.body);
+  if (!f.title || !f.advertiser) return bad(res, 'Advertiser and headline are required');
+  db.prepare('UPDATE ads SET advertiser=?,title=?,text=?,link=?,placement=?,color=?,image=?,active=?,starts_on=?,ends_on=? WHERE id=?')
+    .run(f.advertiser, f.title, f.text, f.link, f.placement, f.color, f.image, f.active, f.starts_on, f.ends_on, id);
+  if (req.body.resetStats) db.prepare('UPDATE ads SET impressions=0, clicks=0 WHERE id=?').run(id);
   res.json({ ok: true });
+});
+app.post('/api/admin/ads/:id/reuse', adminOnly, (req, res) => {
+  const a = db.prepare('SELECT * FROM ads WHERE id=?').get(+req.params.id);
+  if (!a) return bad(res, 'Advert not found', 404);
+  const r = db.prepare('INSERT INTO ads(advertiser,title,text,link,placement,color,image,active,starts_on,ends_on,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(a.advertiser, a.title, a.text, a.link, a.placement, a.color, a.image, 0, null, null, now());
+  res.json({ ok: true, id: r.lastInsertRowid });
 });
 app.delete('/api/admin/ads/:id', adminOnly, (req, res) => { db.prepare('DELETE FROM ads WHERE id=?').run(+req.params.id); res.json({ ok: true }); });
 
@@ -577,6 +624,14 @@ app.put('/api/admin/settings', adminOnly, (req, res) => {
   if (req.body.tagline !== undefined) setSetting('tagline', str(req.body.tagline, 120));
   if (['eic', 'eic+admin'].includes(req.body.flow)) setSetting('flow', req.body.flow);
   if (req.body.moderate !== undefined) setSetting('moderate', !!req.body.moderate);
+  if (req.body.limits && typeof req.body.limits === 'object') {
+    const cur = limits();
+    for (const [k, [lo, hi]] of Object.entries(LIMIT_RULES)) {
+      const v = Number(req.body.limits[k]);
+      if (!isNaN(v) && req.body.limits[k] !== '') cur[k] = Math.min(hi, Math.max(lo, k === 'imgMaxMB' ? Math.round(v * 10) / 10 : Math.round(v)));
+    }
+    setSetting('limits', cur);
+  }
   res.json({ ok: true });
 });
 

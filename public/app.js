@@ -41,7 +41,9 @@ function timeAgo(ts) { if (!ts) return ''; const s = (Date.now() - ts) / 1000; i
 const starStr = n => '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 const tierBadge = t => t ? `<span class="tier" style="background:${t.color}">${t.name}</span>` : '';
 const initials = n => String(n || '?').replace(/^(Engr\.|Dr\.|Prof\.)\s*/, '').split(' ').map(w => w[0]).slice(0, 2).join('');
-const avatar = (name, color) => `<span class="av" style="background:${color || '#022455'}">${esc(initials(name))}</span>`;
+const avatar = (name, color, img, size) => img
+  ? `<img class="av" src="${esc(img)}" alt="" loading="lazy"${size ? ` style="width:${size}px;height:${size}px"` : ''}>`
+  : `<span class="av" style="background:${color || '#022455'}${size ? `;width:${size}px;height:${size}px;font-size:${Math.round(size / 2.6)}px` : ''}">${esc(initials(name))}</span>`;
 const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
 const fmtBody = b => String(b || '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => p.startsWith('## ') ? `<h2>${inline(p.slice(3))}</h2>` : p.startsWith('> ') ? `<blockquote>${inline(p.slice(2))}</blockquote>` : `<p>${inline(p)}</p>`);
 const H2 = t => `<div class="sec-h"><h2>${t}</h2></div>`;
@@ -114,28 +116,65 @@ function flushAds() { if (S.shownAds.length) { POST('/api/ads/impressions', { id
 const LOGO = `<img class="logo-mark" src="/icons/logo-badge.svg" alt="Engineeria Africa logo" width="52" height="52">`;
 function renderTop() {
   const b = S.boot.breaking, w = S.boot.weather.cities[0], path = location.pathname, u = me();
-  const nav = (href, label) => `<a href="${href}" class="${path === href ? 'on' : ''}">${label}</a>`;
-  const bar = b.active ? `<div class="breaking"><div class="wrap"><span class="tag">BREAKING</span><span>${esc(b.text)}</span><span class="sp"></span>${b.slug ? `<a class="lk" href="/article/${b.slug}">Read</a>` : ''}<button data-act="playAlert" title="Play alert sound" aria-label="Play alert sound">🔊</button></div></div>`
+  const items = [['/', 'Home'], ...S.boot.cats.map(c => ['/section/' + c.id, c.name]), ['/weather', 'Weather & Climate'], ['/contributors', 'Top Contributors']];
+  const link = ([href, label]) => `<a href="${href}" class="${path === href ? 'on' : ''}">${label}</a>`;
+  const bar = b.active ? `<div class="breaking"><div class="wrap"><span class="tag">BREAKING</span><span class="btxt">${esc(b.text)}</span><span class="sp"></span>${b.slug ? `<a class="lk" href="/article/${b.slug}">Read</a>` : ''}<button data-act="playAlert" title="Play alert sound" aria-label="Play alert sound">🔊</button></div></div>`
     : (S.ticker?.length ? `<div class="ticker"><b>LATEST</b><div style="overflow:hidden;flex:1"><div class="tr">${[...S.ticker, ...S.ticker].map(a => `<a href="/article/${a.slug}">${esc(a.title)}</a>`).join('')}</div></div></div>` : '');
-  const alertsOn = P.sound;
+  const alertsBtn = `<button class="tb ${P.sound ? 'on' : ''}" data-act="alerts" title="Breaking-news alerts">${P.sound ? '🔔 <span class="lbl-md">Alerts on</span>' : '🔕 <span class="lbl-md">Alerts off</span>'}</button>`;
+  const install = S.installEvt || isIOS() ? `<button class="tb only-browser" data-act="install">⬇ Install app</button>` : '';
+  const q = esc(new URLSearchParams(location.search).get('q') || '');
   $('#top').innerHTML = `<div class="topbar"><div class="wrap">
-   <span class="hide-sm">${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
-   ${w && w.temp != null ? `<a href="/weather">${WX_ICON[w.cond] || '🌡️'} ${esc(w.city)} ${Math.round(w.temp)}°C</a>` : ''}
+   <span class="tb-date">${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+   ${w && w.temp != null ? `<a class="tb-wx" href="/weather">${WX_ICON[w.cond] || '🌡️'} ${esc(w.city)} ${Math.round(w.temp)}°C</a>` : ''}
    <span class="sp"></span>
-   ${S.installEvt || isIOS() ? `<button class="tb only-browser" data-act="install">⬇ Install app</button>` : ''}
-   <button class="tb ${alertsOn ? 'on' : ''}" data-act="alerts" title="Breaking-news alerts">${alertsOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
-   <button class="tb" data-act="dark" title="Dark mode" aria-label="Toggle dark mode">${P.dark ? '☀︎' : '☾'}</button>
-   ${u ? `<a class="tb" href="/dashboard" style="background:var(--accent);border-color:var(--accent)">Dashboard</a><button class="tb hide-sm" data-act="logout">Sign out</button>`
-      : `<a class="tb" href="/login">Sign in</a><a class="tb hide-sm" href="/write-for-us">Write for us</a>`}
+   <div class="tb-desk">${install}${alertsBtn}
+    <button class="tb" data-act="dark" title="Dark mode" aria-label="Toggle dark mode">${P.dark ? '☀︎' : '☾'}</button>
+    ${u ? `<a class="tb tb-user" href="/dashboard">${avatar(u.name, u.color, u.avatar, 22)}<span>Dashboard</span></a><button class="tb" data-act="logout">Sign out</button>`
+      : `<a class="tb" href="/login">Sign in</a><a class="tb tb-acc" href="/write-for-us">Write for us</a>`}</div>
+   <div class="tb-mob">${alertsBtn}</div>
   </div></div>
   <header class="mast"><div class="wrap">
    <a class="logo" href="/">${LOGO}<div><h1>ENGINEERIA <span>AFRICA</span></h1><small>${esc(S.boot.settings.tagline)}</small></div></a>
    <span class="sp"></span>
-   <button class="listen ${S.speaking === 'bulletin' ? 'on' : ''}" data-act="bulletin">🎧 Listen to headlines</button>
-   <form class="search" data-form="search" role="search"><input name="q" placeholder="Search engineering news…" aria-label="Search" value="${esc(new URLSearchParams(location.search).get('q') || '')}"><button aria-label="Search">⌕</button></form>
+   <button class="listen m-hide ${S.speaking === 'bulletin' ? 'on' : ''}" data-act="bulletin">🎧 Listen to headlines</button>
+   <form class="search m-hide" data-form="search" role="search"><input name="q" placeholder="Search engineering news…" aria-label="Search" value="${q}"><button aria-label="Search">⌕</button></form>
+   <button class="burger" data-act="menu" aria-label="Open menu" aria-expanded="${S.menuOpen ? 'true' : 'false'}"><span></span><span></span><span></span></button>
   </div></header>
-  <nav class="nav"><div class="wrap">${nav('/', 'Home')}${S.boot.cats.map(c => nav('/section/' + c.id, c.name)).join('')}${nav('/weather', 'Weather & Climate')}${nav('/contributors', 'Top Contributors')}</div></nav>${bar}`;
+  <nav class="nav" aria-label="Sections"><div class="wrap"><div class="nav-links">${items.map(link).join('')}</div>
+   <div class="nav-more" hidden><button class="nav-more-btn" data-act="navMore" aria-haspopup="true">More ▾</button><div class="nav-more-menu">${items.map(link).join('')}</div></div></div></nav>
+  ${bar}
+  <div class="drawer ${S.menuOpen ? 'open' : ''}" aria-hidden="${S.menuOpen ? 'false' : 'true'}"><div class="drawer-bg" data-act="closeMenu"></div>
+   <aside class="drawer-panel" role="dialog" aria-label="Menu">
+    <div class="drawer-head">${LOGO}<b>Menu</b><span class="sp"></span><button class="drawer-x" data-act="closeMenu" aria-label="Close menu">✕</button></div>
+    <form class="search" data-form="search" role="search"><input name="q" placeholder="Search engineering news…" aria-label="Search" value="${q}"><button aria-label="Search">⌕</button></form>
+    ${u ? `<div class="drawer-user">${avatar(u.name, u.color, u.avatar, 40)}<div><b>${esc(u.name)}</b><div class="meta">${ROLE_NAMES[u.role]}</div></div></div>
+      <div class="drawer-acts"><a class="btn pri" href="/dashboard">Dashboard</a><a class="btn" href="/write">+ New article</a><button class="btn" data-act="logout">Sign out</button></div>`
+      : `<div class="drawer-acts"><a class="btn pri" href="/login">Sign in</a><a class="btn" href="/write-for-us">Write for us</a></div>`}
+    <h4>Sections</h4><div class="drawer-links">${items.map(link).join('')}<a href="/advertise" class="${path === '/advertise' ? 'on' : ''}">Advertise with us</a></div>
+    <h4>Options</h4><div class="drawer-acts">
+     <button class="btn" data-act="bulletin">🎧 Listen to headlines</button>
+     <button class="btn" data-act="alerts">${P.sound ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
+     <button class="btn" data-act="dark">${P.dark ? '☀︎ Light mode' : '☾ Dark mode'}</button>
+     ${S.installEvt || isIOS() ? `<button class="btn only-browser" data-act="install">⬇ Install app</button>` : ''}</div>
+   </aside></div>`;
+  document.body.classList.toggle('menu-open', !!S.menuOpen);
+  fitNav();
   syncListen();
+}
+// Desktop "priority" menu: show as many sections as fit, put the rest under "More"
+function fitNav() {
+  const wrap = $('.nav .wrap'), links = $('.nav-links'), more = $('.nav-more');
+  if (!wrap || !links) return;
+  const main = [...links.children], extra = [...more.querySelectorAll('.nav-more-menu a')];
+  main.forEach(a => a.hidden = false); extra.forEach(a => a.hidden = true); more.hidden = true;
+  if (getComputedStyle($('.nav')).display === 'none') return;
+  if (links.scrollWidth <= wrap.clientWidth) return;
+  more.hidden = false;
+  const room = links.clientWidth;  // space left for links once "More" is showing
+  let used = 0, cut = main.length;
+  for (let i = 0; i < main.length; i++) { used += main[i].offsetWidth + 2; if (used > room) { cut = i; break; } }
+  main.forEach((a, i) => { a.hidden = i >= cut; extra[i].hidden = i < cut; });
+  more.querySelector('.nav-more-btn').classList.toggle('on', extra.some(a => !a.hidden && a.classList.contains('on')));
 }
 function renderFoot() {
   $('#foot').innerHTML = `<footer><div class="wrap">
@@ -171,7 +210,7 @@ function sidebar(sb) {
    ${adSlot('sidebar')}
    ${sb.mostRead.length ? `<div class="panel"><h3>Most read</h3>${sb.mostRead.map((a, i) => `<a class="mr" href="/article/${a.slug}"><span class="n">${i + 1}</span><div><h4>${esc(a.title)}</h4><span class="meta">👁 ${a.views.toLocaleString()} views</span></div></a>`).join('')}</div>` : ''}
    <div class="panel"><h3>Upcoming events</h3>${sb.events.length ? sb.events.map(evRow).join('') : '<div class="meta">No upcoming events listed.</div>'}<a href="/section/events" class="meta" style="color:var(--accent);font-weight:600">All events →</a></div>
-   ${sb.top.length ? `<div class="panel"><h3>Top contributors</h3>${sb.top.map((r, i) => `<div class="mr"><span class="n">${i + 1}</span>${avatar(r.name, r.color)}<div><h4>${esc(r.name)}</h4><span class="meta">${tierBadge(r.tier)} ${r.score} pts</span></div></div>`).join('')}<a href="/contributors" class="meta" style="color:var(--accent);font-weight:600">Leaderboard →</a></div>` : ''}
+   ${sb.top.length ? `<div class="panel"><h3>Top contributors</h3>${sb.top.map((r, i) => `<a class="mr" href="/author/${r.id}"><span class="n">${i + 1}</span>${avatar(r.name, r.color, r.avatar)}<div><h4>${esc(r.name)}</h4><span class="meta">${tierBadge(r.tier)} ${r.score} pts</span></div></a>`).join('')}<a href="/contributors" class="meta" style="color:var(--accent);font-weight:600">Leaderboard →</a></div>` : ''}
   </aside>`;
 }
 
@@ -209,9 +248,9 @@ function videoBlock(v) {
   if (!v?.src) return '';
   if (v.type === 'file') return `<div class="video"><video src="${esc(v.src)}" controls playsinline preload="metadata"></video></div>`;
   let m = v.src.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([\w-]{11})/), emb = null, label = 'Watch video';
-  if (m) { emb = 'https://www.youtube-nocookie.com/embed/' + m[1]; label = 'Watch on YouTube'; }
+  if (m) { emb = 'https://www.youtube.com/embed/' + m[1]; label = 'Watch on YouTube'; }
   else if ((m = v.src.match(/vimeo\.com\/(\d+)/))) { emb = 'https://player.vimeo.com/video/' + m[1]; label = 'Watch on Vimeo'; }
-  return `${emb ? `<div class="video"><iframe src="${emb}" allowfullscreen loading="lazy" title="Video" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture"></iframe></div>` : ''}<p class="meta" style="margin:0 0 18px">▶ <a href="${esc(v.src)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">${label} ↗</a></p>`;
+  return `${emb ? `<div class="video"><iframe src="${emb}" allowfullscreen loading="lazy" title="Video" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"></iframe></div>` : ''}<p class="meta" style="margin:0 0 18px">▶ <a href="${esc(v.src)}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">${label} ↗</a></p>`;
 }
 function shareBar(a) {
   const url = location.origin + '/article/' + a.slug, u = encodeURIComponent(url), t = encodeURIComponent(a.title);
@@ -230,7 +269,7 @@ async function viewArticle(slug) {
    ${a.status !== 'published' ? `<div class="note"><b>Preview</b> — status: <span class="pill s-${a.status}">${a.status}</span>${a.editorNote ? ` · Editor note: ${esc(a.editorNote)}` : ''}</div>` : ''}
    <div class="crumb"><a href="/">Home</a> › <a href="/section/${c.id}" style="color:${c.color};font-weight:700">${c.name}</a></div>
    <h1>${esc(a.title)}</h1><p class="stand">${esc(a.excerpt)}</p>
-   <div class="byline">${avatar(a.authorName, a.authorColor)}<div><b>${esc(a.authorName)}</b> ${tierBadge(au?.tier)}<div class="meta">${a.publishedAt ? fmtDate(a.publishedAt) : 'Not yet published'} · ${a.readTime} min read · 👁 ${a.views.toLocaleString()} views${a.ratingN ? ` · <span class="stars">${starStr(a.rating)}</span> ${a.rating.toFixed(1)} (${a.ratingN})` : ''}</div></div></div>
+   <div class="byline"><a href="/author/${a.authorId}">${avatar(a.authorName, a.authorColor, a.authorAvatar)}</a><div><a href="/author/${a.authorId}"><b>${esc(a.authorName)}</b></a> ${tierBadge(au?.tier)}${a.authorHeadline ? `<span class="meta"> · ${esc(a.authorHeadline)}</span>` : ''}<div class="meta">${a.publishedAt ? fmtDate(a.publishedAt) : 'Not yet published'} · ${a.readTime} min read · 👁 ${a.views.toLocaleString()} views${a.ratingN ? ` · <span class="stars">${starStr(a.rating)}</span> ${a.rating.toFixed(1)} (${a.ratingN})` : ''}</div></div></div>
    <div class="toolrow"><button class="listen" data-act="listen" data-id="${a.id}">🎧 Listen to this story</button><span class="sp"></span>${shareBar(a)}</div>
    <figure class="figure"><img src="${coverOf(a)}" alt=""></figure>
    ${videoBlock(a.video)}
@@ -238,6 +277,7 @@ async function viewArticle(slug) {
    <div class="prose">${paras.join('')}</div>
    ${a.tags ? `<p>${a.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="chip" href="/search?q=${encodeURIComponent(t)}"># ${esc(t)}</a>`).join('')}</p>` : ''}
    <div class="toolrow" style="border-top:1px solid var(--line);padding-top:14px"><b>Share this story</b><span class="sp"></span>${shareBar(a)}</div>
+   ${au ? `<div class="author-box">${avatar(au.name, au.color, au.avatar, 72)}<div><div class="meta" style="text-transform:uppercase;letter-spacing:.08em;font-size:11px">About the author</div><b style="font-size:17px">${esc(au.name)}</b> ${tierBadge(au.tier)}${au.headline ? `<div class="meta">${esc(au.headline)}</div>` : ''}${au.bio ? `<p class="clamp3">${esc(au.bio)}</p>` : ''}<a href="/author/${au.id}" style="color:var(--accent);font-weight:600;font-size:14px">View profile & all stories →</a></div></div>` : ''}
    ${H2(`Comments & reviews (${d.comments.length})`)}
    ${a.status === 'published' ? `<form class="panel" data-form="comment" data-id="${a.id}">
     <div class="grid2"><div><label style="margin-top:0">Your name</label><input name="name" required maxlength="60" value="${esc(me()?.name || '')}"></div>
@@ -269,10 +309,26 @@ async function viewContributors() {
   const list = await GET('/api/contributors');
   return `<div class="wrap" style="padding-block:24px">${H2('Top contributors')}
    <p class="meta" style="margin-top:-6px">Score = views ÷ 10 + approved comments × 3 + (average review stars × number of reviews) × 2. Tiers: Bronze, Silver (50+), Gold (150+), Platinum (400+).</p>
-   <div class="lb">${list.map((r, i) => `<div class="lbc"><span class="rk">#${i + 1}</span><div style="display:flex;gap:10px;align-items:center">${avatar(r.name, r.color)}<div><b>${esc(r.name)}</b><div class="meta">${ROLE_NAMES[r.role] || ''}</div></div></div>
+   <div class="lb">${list.map((r, i) => `<a class="lbc" href="/author/${r.id}"><span class="rk">#${i + 1}</span><div style="display:flex;gap:10px;align-items:center">${avatar(r.name, r.color, r.avatar, 48)}<div><b>${esc(r.name)}</b><div class="meta">${esc(r.headline || ROLE_NAMES[r.role] || '')}</div></div></div>
     <div style="display:flex;align-items:flex-end;gap:10px;margin-top:12px"><span class="score">${r.score}</span><span class="meta">points</span><span class="sp"></span>${tierBadge(r.tier)}</div>
     <div class="mini"><div><b>${r.stories}</b><span>Stories</span></div><div><b>${r.views.toLocaleString()}</b><span>Views</span></div><div><b>${r.comments}</b><span>Comments</span></div><div><b>${r.avg ? r.avg.toFixed(1) : '–'}</b><span>Rating</span></div></div>
-    ${r.bio ? `<p class="meta" style="margin:10px 0 0">${esc(r.bio)}</p>` : ''}</div>`).join('') || '<div class="empty panel">Rankings appear once stories are published.</div>'}</div></div>`;
+    ${r.bio ? `<p class="meta clamp3" style="margin:10px 0 0">${esc(r.bio)}</p>` : ''}</a>`).join('') || '<div class="empty panel">Rankings appear once stories are published.</div>'}</div></div>`;
+}
+async function viewAuthor(id) {
+  let p; try { p = await GET('/api/authors/' + id); } catch { return notFound(); }
+  const st = p.stats || {};
+  document.title = p.name + ' — Engineeria Africa';
+  const site = p.website ? `<a href="${esc(p.website)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(p.website.replace(/^https?:\/\//, ''))} ↗</a>` : '';
+  return `<div class="wrap" style="padding-block:24px">
+   <div class="profile-head panel">${avatar(p.name, p.color, p.avatar, 120)}
+    <div class="ph-main"><h1 style="font-size:clamp(24px,4vw,34px)">${esc(p.name)}</h1>
+     <div class="meta" style="font-size:15px">${esc(p.headline || ROLE_NAMES[p.role] || '')}${p.location ? ' · 📍 ' + esc(p.location) : ''}</div>
+     <div style="margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">${tierBadge(st.tier)} <b>${st.score || 0}</b><span class="meta">points${p.rank ? ` · rank #${p.rank} of ${p.of}` : ''}</span>${site ? ' · ' + site : ''}</div>
+     <div class="mini" style="max-width:460px"><div><b>${st.stories || 0}</b><span>Stories</span></div><div><b>${(st.views || 0).toLocaleString()}</b><span>Views</span></div><div><b>${st.comments || 0}</b><span>Comments</span></div><div><b>${st.avg ? st.avg.toFixed(1) : '–'}</b><span>Rating</span></div></div>
+    </div></div>
+   ${p.bio ? `<div class="panel prose" style="font-size:17px">${fmtBody(p.bio).join('')}</div>` : ''}
+   ${H2('Stories by ' + esc(p.name))}
+   <div class="cards">${p.articles.map(card).join('') || '<div class="meta">No published stories yet.</div>'}</div></div>`;
 }
 const viewSearch = q => q ? viewList(`Search: “${esc(q)}”`, 'q=' + encodeURIComponent(q)) : viewHome();
 function viewLogin() {
@@ -297,20 +353,37 @@ function viewAdvertise() {
 }
 const notFound = () => `<div class="wrap empty panel" style="margin-top:24px"><h3>Page not found</h3><p>The story may have been moved or unpublished.</p><a class="btn pri" href="/">Back to home</a></div>`;
 
+/* ================= PROFILE FORM ================= */
+function profileForm(u, formName, title) {
+  return `<form class="panel" data-form="${formName}" data-id="${u.id}">${title ? `<h3 style="margin-bottom:6px">${title}</h3>` : ''}
+   <div class="pf-photo">${avatar(u.name, u.color, u.avatar, 96)}<div style="flex:1;min-width:200px">
+    <label style="margin-top:0">Profile photo</label><input type="file" accept="image/*" data-up="avatar" data-kind="avatar" data-target="pf${u.id}">
+    <input type="hidden" name="avatar" id="pf${u.id}" value="${esc(u.avatar || '')}">
+    <div class="prev" id="pf${u.id}Prev"></div>
+    <div class="hint">Square photos look best. It is cropped to a square automatically.${u.avatar ? ` <button type="button" class="btn sm no" data-act="rmPhoto" data-id="pf${u.id}">Remove photo</button>` : ''}</div></div></div>
+   <div class="grid2"><div><label>Full name</label><input name="name" required maxlength="80" value="${esc(u.name)}"></div>
+    <div><label>Job title / headline</label><input name="headline" maxlength="120" value="${esc(u.headline || '')}" placeholder="e.g. Structural Engineer, MNSE"></div></div>
+   <div class="grid2"><div><label>Location</label><input name="location" maxlength="80" value="${esc(u.location || '')}" placeholder="e.g. Owerri, Nigeria"></div>
+    <div><label>Website or LinkedIn</label><input name="website" maxlength="300" value="${esc(u.website || '')}" placeholder="linkedin.com/in/…"></div></div>
+   <label>Biography <span class="meta" data-count="bio${u.id}">${(u.bio || '').length}/2000</span></label>
+   <textarea name="bio" maxlength="2000" data-counter="bio${u.id}" style="min-height:180px" placeholder="Your background, specialisations, experience and achievements. Leave a blank line between paragraphs.">${esc(u.bio || '')}</textarea>
+   <div class="btns" style="margin-top:12px"><button class="btn pri">Save profile</button>${formName === 'adminProfile' ? '<button type="button" class="btn" data-act="cancelUserEdit">Cancel</button>' : `<a class="btn" href="/author/${u.id}">View public profile</a>`}</div></form>`;
+}
+
 /* ================= DASHBOARD ================= */
 async function viewDash() {
   const u = me(); if (!u) { go('/login', true); return ''; }
   const r = u.role;
   if (staff()) { try { S.counts = await GET('/api/admin/counts'); } catch { S.counts = {}; } }
   const c = S.counts;
-  const tabs = r === 'admin' ? [['overview', 'Overview'], ['queue', 'Approvals', c.queue], ['articles', 'All articles'], ['comments', 'Comments', c.comments], ['users', 'Users & roles', c.applicants], ['ads', 'Advertising'], ['events', 'Events'], ['weather', 'Weather & climate'], ['breaking', 'Breaking news'], ['settings', 'Settings'], ['mine', 'My articles'], ['account', 'My account']]
-    : r === 'eic' ? [['queue', 'Review queue', c.queue], ['articles', 'All articles'], ['comments', 'Comments', c.comments], ['breaking', 'Breaking news'], ['events', 'Events'], ['mine', 'My articles'], ['account', 'My account']]
-      : [['mine', 'My articles'], ['rating', 'My rating'], ['account', 'My account']];
+  const tabs = r === 'admin' ? [['overview', 'Overview'], ['queue', 'Approvals', c.queue], ['articles', 'All articles'], ['comments', 'Comments', c.comments], ['users', 'Users & roles', c.applicants], ['ads', 'Advertising'], ['events', 'Events'], ['weather', 'Weather & climate'], ['breaking', 'Breaking news'], ['settings', 'Settings'], ['mine', 'My articles'], ['account', 'My profile']]
+    : r === 'eic' ? [['queue', 'Review queue', c.queue], ['articles', 'All articles'], ['comments', 'Comments', c.comments], ['breaking', 'Breaking news'], ['events', 'Events'], ['mine', 'My articles'], ['account', 'My profile']]
+      : [['mine', 'My articles'], ['rating', 'My rating'], ['account', 'My profile']];
   if (!tabs.some(t => t[0] === S.dashTab)) S.dashTab = tabs[0][0];
   const T = { overview: tabOverview, queue: tabQueue, articles: tabArticles, comments: tabComments, users: tabUsers, ads: tabAds, events: tabEvents, weather: tabWeather, breaking: tabBreaking, settings: tabSettings, mine: tabMine, rating: tabRating, account: tabAccount };
   let content; try { content = await T[S.dashTab](); } catch (e) { content = `<div class="err">${esc(e.message)}</div>`; }
   const msg = S.msg ? `<div class="okbox">${S.msg}</div>` : ''; S.msg = '';
-  return `<div class="wrap dash"><aside class="side"><div class="who">${avatar(u.name, u.color)}<div><b>${esc(u.name)}</b><br><span class="meta">${ROLE_NAMES[r]}</span></div></div>
+  return `<div class="wrap dash"><aside class="side"><div class="who">${avatar(u.name, u.color, u.avatar)}<div><b>${esc(u.name)}</b><br><span class="meta">${ROLE_NAMES[r]}</span></div></div>
    ${tabs.map(([k, l, n]) => `<a class="${k === S.dashTab ? 'on' : ''}" data-act="tab" data-id="${k}" href="#">${l}${n ? `<span class="badge">${n}</span>` : ''}</a>`).join('')}
    <a href="/write" style="background:var(--accent);color:#fff;margin-top:8px;text-align:center">+ New article</a></aside><section>${msg}${content}</section></div>`;
 }
@@ -353,27 +426,45 @@ async function tabComments() {
 }
 async function tabUsers() {
   const list = await GET('/api/admin/users');
-  return H2('Users & roles') + `<div class="tw"><table class="tbl"><tr><th>Name</th><th>Role</th><th>Status</th><th>Score</th><th>Actions</th></tr>
-   ${list.map(u => { const self = u.id === me().id; return `<tr><td><div style="display:flex;gap:8px;align-items:center">${avatar(u.name, u.color)}<div><b>${esc(u.name)}</b><div class="meta">${esc(u.email)}</div>${u.bio ? `<div class="meta">${esc(u.bio)}</div>` : ''}</div></div></td>
+  const editing = S.editUser && list.find(u => u.id === S.editUser);
+  return H2('Users & roles') + (editing ? profileForm(editing, 'adminProfile', 'Edit profile — ' + esc(editing.name)) : '') + `<div class="tw"><table class="tbl"><tr><th>Name</th><th>Role</th><th>Status</th><th>Score</th><th>Actions</th></tr>
+   ${list.map(u => { const self = u.id === me().id; return `<tr><td><div style="display:flex;gap:8px;align-items:center">${avatar(u.name, u.color, u.avatar)}<div><b>${esc(u.name)}</b><div class="meta">${esc(u.email)}</div>${u.headline ? `<div class="meta">${esc(u.headline)}</div>` : ''}</div></div></td>
    <td><select data-ch="userRole" data-id="${u.id}" ${self ? 'disabled' : ''}>${['contributor', 'eic', 'admin'].map(x => `<option value="${x}" ${u.role === x ? 'selected' : ''}>${ROLE_NAMES[x]}</option>`).join('')}</select></td>
    <td><span class="pill ${u.status === 'active' ? 's-published' : u.status === 'pending' ? 's-pending' : 's-rejected'}">${u.status === 'pending' ? 'applied' : u.status}</span></td><td>${u.score}</td>
    <td>${self ? '<span class="meta">You</span>' : `<div class="btns">${u.status === 'pending' ? `<button class="btn sm ok" data-act="userSt" data-st="active" data-id="${u.id}">Approve</button><button class="btn sm no" data-act="userDel" data-id="${u.id}">Decline</button>` : u.status === 'active' ? `<button class="btn sm no" data-act="userSt" data-st="suspended" data-id="${u.id}">Suspend</button>` : `<button class="btn sm" data-act="userSt" data-st="active" data-id="${u.id}">Reactivate</button>`}
-    <button class="btn sm" data-act="userReset" data-id="${u.id}">Reset password</button></div>`}</td></tr>`; }).join('')}</table></div>
+    <button class="btn sm" data-act="userReset" data-id="${u.id}">Reset password</button></div>`}<div style="margin-top:6px"><button class="btn sm" data-act="userEdit" data-id="${u.id}">✎ Edit profile</button></div></td></tr>`; }).join('')}</table></div>
    ${H2('Add a team member')}<form class="panel" data-form="user"><div class="grid2"><div><label style="margin-top:0">Full name</label><input name="name" required></div><div><label style="margin-top:0">Email</label><input name="email" type="email" required></div></div>
-   <div class="grid2"><div><label>Role</label><select name="role"><option value="contributor">Contributor</option><option value="eic">Editor-in-Chief</option><option value="admin">Administrator</option></select></div><div><label>Short bio</label><input name="bio" placeholder="e.g. Water resources engineer, Abuja"></div></div>
+   <div class="grid2"><div><label>Role</label><select name="role"><option value="contributor">Contributor</option><option value="eic">Editor-in-Chief</option><option value="admin">Administrator</option></select></div><div><label>Job title / headline</label><input name="headline" maxlength="120" placeholder="e.g. Water resources engineer, Abuja"></div></div>
    <p class="hint">A temporary password is shown after you add them — share it privately; they can change it under My account.</p><button class="btn pri">Add user</button></form>`;
+}
+function adStatus(a) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (!a.active) return ['Paused', 's-draft'];
+  if (a.ends_on && a.ends_on < today) return ['Ended', 's-rejected'];
+  if (a.starts_on && a.starts_on > today) return ['Scheduled', 's-approved'];
+  return ['Running', 's-published'];
 }
 async function tabAds() {
   const list = await GET('/api/admin/ads');
   const where = { top: 'Top banner', sidebar: 'Sidebar', inline: 'In-article' };
-  return H2('Advertising') + `<div class="tw"><table class="tbl"><tr><th>Advert</th><th>Placement</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th></th></tr>
-   ${list.map(a => `<tr><td><b>${esc(a.title)}</b><div class="meta">${esc(a.advertiser)}${a.ends_on ? ' · ends ' + a.ends_on : ''}${a.link ? ` · <a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.link)}</a>` : ''}</div></td><td>${where[a.placement]}</td><td>${a.impressions.toLocaleString()}</td><td>${a.clicks}</td><td>${a.impressions ? (a.clicks / a.impressions * 100).toFixed(1) + '%' : '–'}</td>
-   <td><div class="btns"><button class="btn sm ${a.active ? '' : 'ok'}" data-act="adToggle" data-on="${a.active ? 0 : 1}" data-id="${a.id}">${a.active ? 'Pause' : 'Activate'}</button><button class="btn sm no" data-act="adDel" data-id="${a.id}">Delete</button></div></td></tr>`).join('') || '<tr><td colspan="6" class="empty">No adverts yet.</td></tr>'}</table></div>
-   ${H2('New advert')}<form class="panel" data-form="ad"><div class="grid2"><div><label style="margin-top:0">Advertiser</label><input name="advertiser" required></div><div><label style="margin-top:0">Placement</label><select name="placement"><option value="top">Top banner (homepage)</option><option value="sidebar">Sidebar (all pages)</option><option value="inline">In-article</option></select></div></div>
-   <label>Headline</label><input name="title" required maxlength="120"><label>Supporting text</label><input name="text" maxlength="200">
-   <div class="grid2"><div><label>Destination link</label><input name="link" type="url" placeholder="https://"></div><div><label>Campaign end date (optional)</label><input name="endsOn" type="date"></div></div>
-   <div class="grid2"><div><label>Brand colour</label><input name="color" type="color" value="#f26a1b" style="height:42px"></div><div><label>Banner image (optional)</label><input type="file" accept="image/*" data-up="adimg"><input type="hidden" name="image" id="adimgUrl"><div class="prev" id="adimgPrev"></div></div></div>
-   <div style="margin-top:14px"><button class="btn pri">Create advert</button></div></form>`;
+  const e = S.editAd ? list.find(a => a.id === S.editAd) : null;
+  if (S.editAd && !e) S.editAd = null;
+  const v = e || { placement: 'top', color: '#fe5800', active: 1 };
+  return H2('Advertising') + `<div class="tw"><table class="tbl"><tr><th>Campaign</th><th>Placement</th><th>Status</th><th>Impressions</th><th>Clicks</th><th>CTR</th><th></th></tr>
+   ${list.map(a => { const [st, cls] = adStatus(a); return `<tr ${e && e.id === a.id ? 'style="background:var(--bg)"' : ''}><td><b>${esc(a.title)}</b><div class="meta">${esc(a.advertiser)}${a.starts_on || a.ends_on ? ` · ${a.starts_on || '…'} → ${a.ends_on || '…'}` : ''}</div>${a.link ? `<div class="meta"><a href="${esc(a.link)}" target="_blank" rel="noopener">${esc(a.link)}</a></div>` : ''}</td><td>${where[a.placement]}</td><td><span class="pill ${cls}">${st}</span></td><td>${a.impressions.toLocaleString()}</td><td>${a.clicks}</td><td>${a.impressions ? (a.clicks / a.impressions * 100).toFixed(1) + '%' : '–'}</td>
+   <td><div class="btns"><button class="btn sm" data-act="adEdit" data-id="${a.id}">✎ Edit</button><button class="btn sm" data-act="adReuse" data-id="${a.id}" title="Copy this campaign to run it again">↻ Reuse</button><button class="btn sm ${a.active ? '' : 'ok'}" data-act="adToggle" data-on="${a.active ? 0 : 1}" data-id="${a.id}">${a.active ? 'Pause' : 'Activate'}</button><button class="btn sm no" data-act="adDel" data-id="${a.id}">${S.confirmKey === 'ad' + a.id ? 'Confirm?' : 'Delete'}</button></div></td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">No adverts yet.</td></tr>'}</table></div>
+   <div id="adForm">${H2(e ? 'Edit campaign' : 'New advert')}</div>
+   <form class="panel" data-form="ad" data-id="${e ? e.id : ''}">
+    ${e ? `<div class="note" style="margin-top:0">Editing <b>${esc(e.title)}</b> — ${e.impressions.toLocaleString()} impressions, ${e.clicks} clicks so far.</div>` : ''}
+    <div class="grid2"><div><label style="margin-top:0">Advertiser</label><input name="advertiser" required value="${esc(v.advertiser || '')}"></div><div><label style="margin-top:0">Placement</label><select name="placement">${Object.entries({ top: 'Top banner (homepage)', sidebar: 'Sidebar (all pages)', inline: 'In-article' }).map(([k, l]) => `<option value="${k}" ${v.placement === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
+    <label>Headline</label><input name="title" required maxlength="120" value="${esc(v.title || '')}"><label>Supporting text</label><input name="text" maxlength="200" value="${esc(v.text || '')}">
+    <label>Destination link</label><input name="link" type="url" placeholder="https://" value="${esc(v.link || '')}">
+    <div class="grid2"><div><label>Start date (optional)</label><input name="startsOn" type="date" value="${esc(v.starts_on || '')}"></div><div><label>End date (optional)</label><input name="endsOn" type="date" value="${esc(v.ends_on || '')}"></div></div>
+    <div class="grid2"><div><label>Brand colour</label><input name="color" type="color" value="${esc(v.color || '#fe5800')}" style="height:42px"></div>
+     <div><label>Banner image (optional)</label><input type="file" accept="image/*" data-up="adimg" data-kind="image" data-target="adimgUrl"><input type="hidden" name="image" id="adimgUrl" value="${esc(v.image || '')}"><div class="prev" id="adimgUrlPrev">${v.image ? `<img src="${esc(v.image)}" alt=""><button type="button" class="btn sm no" data-act="rmPhoto" data-id="adimgUrl" style="margin-top:6px">Remove image</button>` : ''}</div></div></div>
+    <label class="ck"><input type="checkbox" name="active" ${v.active ? 'checked' : ''}> Campaign is active (runs between the start and end dates)</label>
+    ${e ? `<label class="ck"><input type="checkbox" name="resetStats"> Reset impressions and clicks to zero</label>` : ''}
+    <div class="btns" style="margin-top:14px"><button class="btn pri">${e ? 'Save changes' : 'Create advert'}</button>${e ? '<button type="button" class="btn" data-act="adCancel">Cancel</button>' : ''}</div></form>`;
 }
 async function tabEvents() {
   const list = await GET('/api/events');
@@ -401,11 +492,21 @@ async function tabBreaking() {
    <div class="btns" style="margin-top:12px"><button class="btn pri" style="background:var(--red);border-color:var(--red)">🔴 Go live</button><button type="button" class="btn" data-act="playAlert">🔊 Preview alert sound</button></div></form>`;
 }
 async function tabSettings() {
-  const s = S.boot.settings;
+  const s = S.boot.settings, L = S.boot.limits;
   return H2('Settings') + `<form class="panel" data-form="settings"><label style="margin-top:0">Tagline</label><input name="tagline" value="${esc(s.tagline)}">
    <label>Publishing flow</label><select name="flow"><option value="eic" ${s.flow === 'eic' ? 'selected' : ''}>Contributor → Editor-in-Chief publishes</option><option value="eic+admin" ${s.flow !== 'eic' ? 'selected' : ''}>Contributor → Editor-in-Chief approves → Admin publishes</option></select>
    <label class="ck"><input type="checkbox" name="moderate" ${s.moderate ? 'checked' : ''}> Hold reader comments for moderation before they appear</label>
-   <div style="margin-top:12px"><button class="btn pri">Save settings</button></div></form>`;
+   ${H2('Images & media limits')}
+   <p class="hint" style="margin-top:-6px">These apply to every new upload — featured images, advert banners and profile photos. Bigger photos are shrunk automatically and saved in the compact WebP format.</p>
+   <div class="grid3">
+    <div><label>Largest image a user may upload (MB)</label><input name="imgMaxMB" type="number" min="0.1" max="50" step="0.1" value="${L.imgMaxMB}"></div>
+    <div><label>Resize images to at most (pixels)</label><input name="imgMaxWidth" type="number" min="200" max="6000" step="10" value="${L.imgMaxWidth}"><div class="hint">Longest side. 1600 suits most screens.</div></div>
+    <div><label>Image quality (%)</label><input name="imgQuality" type="number" min="40" max="100" value="${L.imgQuality}"><div class="hint">Lower = smaller files. 75–85 is a good balance.</div></div>
+    <div><label>Profile photo size (pixels, square)</label><input name="avatarSize" type="number" min="100" max="1000" step="10" value="${L.avatarSize}"></div>
+    <div><label>Largest video (MB)</label><input name="videoMaxMB" type="number" min="1" max="2048" value="${L.videoMaxMB}"><div class="hint">Above 250 MB, also raise <code>client_max_body_size</code> in the Nginx file.</div></div>
+    <div><label>Largest audio (MB)</label><input name="audioMaxMB" type="number" min="1" max="500" value="${L.audioMaxMB}"></div>
+   </div>
+   <div style="margin-top:16px"><button class="btn pri">Save settings</button></div></form>`;
 }
 async function tabMine() {
   const list = await GET('/api/my/articles');
@@ -422,7 +523,7 @@ async function tabRating() {
 }
 async function tabAccount() {
   const u = me();
-  return H2('My account') + `<form class="panel" data-form="profile"><label style="margin-top:0">Display name</label><input name="name" value="${esc(u.name)}" required><label>Short bio (shown on the leaderboard)</label><input name="bio" value="${esc(u.bio || '')}" maxlength="300"><div style="margin-top:12px"><button class="btn pri">Save profile</button></div></form>
+  return H2('My profile') + profileForm(u, 'profile') + `
    <form class="panel" data-form="password"><h3>Change password</h3><label>Current password</label><input name="current" type="password" required autocomplete="current-password"><label>New password (8+ characters)</label><input name="next" type="password" minlength="8" required autocomplete="new-password"><div style="margin-top:12px"><button class="btn pri">Change password</button> <button type="button" class="btn" data-act="logout">Sign out</button></div></form>`;
 }
 
@@ -446,10 +547,10 @@ async function viewWrite(id) {
     <label>Story</label><textarea name="body" required style="min-height:300px" placeholder="Separate paragraphs with a blank line. Use ## for a sub-heading, > for a quote and **bold** for emphasis.">${esc(e.body)}</textarea>
     <div class="hint">Formatting: blank line = new paragraph · ## Sub-heading · > Quote · **bold**</div>
     ${H2('Media')}
-    <label style="margin-top:0">Featured image (JPG/PNG/WebP, up to 8 MB)</label><input type="file" accept="image/*" data-up="cover"><div class="prev" id="coverPrev">${prevHTML('cover')}</div>
+    <label style="margin-top:0">Featured image (JPG/PNG/WebP, up to ${S.boot.limits.imgMaxMB} MB)</label><input type="file" accept="image/*" data-up="cover"><div class="prev" id="coverPrev">${prevHTML('cover')}</div>
     <label>Video — paste a YouTube / Vimeo link</label><input name="videoLink" type="url" placeholder="https://www.youtube.com/watch?v=…" value="${esc(e.videoLink || '')}">
-    <label>…or upload a video file (MP4/WebM, up to 250 MB)</label><input type="file" accept="video/mp4,video/webm,video/quicktime" data-up="videoFile"><div class="prev" id="videoFilePrev">${prevHTML('videoFile')}</div>
-    <label>Audio report (optional — e.g. a recorded voice version, up to 40 MB)</label><input type="file" accept="audio/*" data-up="audio"><div class="prev" id="audioPrev">${prevHTML('audio')}</div>
+    <label>…or upload a video file (MP4/WebM, up to ${S.boot.limits.videoMaxMB} MB)</label><input type="file" accept="video/mp4,video/webm,video/quicktime" data-up="videoFile"><div class="prev" id="videoFilePrev">${prevHTML('videoFile')}</div>
+    <label>Audio report (optional — e.g. a recorded voice version, up to ${S.boot.limits.audioMaxMB} MB)</label><input type="file" accept="audio/*" data-up="audio"><div class="prev" id="audioPrev">${prevHTML('audio')}</div>
     <div class="hint">Every published story also gets a “Listen” button that reads it aloud automatically.</div>
     <div id="formErr"></div>
     <div class="btns" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
@@ -476,7 +577,7 @@ async function route(opts = {}) {
   const id = ++S.routeId, path = location.pathname.replace(/\/+$/, '') || '/', q = new URLSearchParams(location.search);
   if (S.speaking) { speechSynthesis.cancel(); S.speaking = null; }
   if (!path.startsWith('/write')) S.editing = null;
-  S.confirmKey = null; S.current = null; S.shownAds = [];
+  S.confirmKey = null; S.current = null; S.shownAds = []; S.menuOpen = false;
   document.title = 'Engineeria Africa — Engineering News & Magazine';
   renderTop();
   const main = $('#main');
@@ -489,6 +590,7 @@ async function route(opts = {}) {
     else if (path === '/search') html = await viewSearch(q.get('q') || '');
     else if (path === '/weather') html = await viewWeather();
     else if (path === '/contributors') html = await viewContributors();
+    else if ((m = path.match(/^\/author\/(\d+)$/))) html = await viewAuthor(m[1]);
     else if (path === '/login') html = viewLogin();
     else if (path === '/write-for-us') html = viewApply();
     else if (path === '/advertise') html = viewAdvertise();
@@ -555,11 +657,20 @@ const ACT = {
   async userDel(id) { await DEL('/api/admin/users/' + id); toast('Application declined'); refreshMain(); },
   async userReset(id) { const r = await PUT('/api/admin/users/' + id, { resetPassword: true }); S.msg = `Temporary password: <b style="font-family:monospace;font-size:16px">${esc(r.tempPassword)}</b> — share it privately; they should change it under My account.`; refreshMain(); },
   async adToggle(id, el) { await PUT('/api/admin/ads/' + id, { active: el.dataset.on === '1' }); S.ads = await GET('/api/ads'); refreshMain(); },
-  async adDel(id) { await DEL('/api/admin/ads/' + id); S.ads = await GET('/api/ads'); refreshMain(); },
+  async adDel(id, el) { if (S.confirmKey !== 'ad' + id) { S.confirmKey = 'ad' + id; el.textContent = 'Confirm?'; return; } S.confirmKey = null; if (S.editAd === +id) S.editAd = null; await DEL('/api/admin/ads/' + id); S.ads = await GET('/api/ads'); refreshMain(); },
   async evDel(id) { await DEL('/api/admin/events/' + id); S.sidebar = null; refreshMain(); },
   wxAdd() { $('#wxTable').insertAdjacentHTML('beforeend', wxRow()); },
   wxDel(_, el) { el.closest('tr').remove(); },
   async brkOff() { await DEL('/api/admin/breaking'); await reloadBoot(); renderFlash(); toast('Breaking news stopped'); refreshMain(); },
+  menu() { setMenu(!S.menuOpen); },
+  closeMenu() { if (S.menuOpen) setMenu(false); },
+  navMore(_, el) { el.parentElement.classList.toggle('open'); },
+  userEdit(id) { S.editUser = +id; refreshMain().then(() => $('[data-form=adminProfile]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); },
+  cancelUserEdit() { S.editUser = null; refreshMain(); },
+  rmPhoto(id) { const i = $('#' + id); if (i) i.value = ''; const p = $('#' + id + 'Prev'); if (p) p.innerHTML = '<div class="hint">Removed — click Save to confirm.</div>'; },
+  adEdit(id) { S.editAd = +id; refreshMain().then(() => $('#adForm')?.scrollIntoView({ behavior: 'smooth' })); },
+  async adReuse(id) { const r = await POST(`/api/admin/ads/${id}/reuse`); S.editAd = r.id; S.msg = '✓ Campaign copied with fresh statistics. Set the new dates, tick “Campaign is active”, then save.'; await refreshMain(); $('#adForm')?.scrollIntoView({ behavior: 'smooth' }); },
+  adCancel() { S.editAd = null; refreshMain(); },
   rmMedia(k) { S.editing[k] = null; $('#' + k + 'Prev').innerHTML = prevHTML(k); },
   cancelEdit() { S.editing = null; },
 };
@@ -583,7 +694,13 @@ const FORM = {
     go('/dashboard');
   },
   async user(fd, f) { const r = await POST('/api/admin/users', Object.fromEntries(fd)); S.msg = `✓ ${esc(fd.get('name'))} added. Temporary password: <b style="font-family:monospace;font-size:16px">${esc(r.tempPassword)}</b> — share it privately; they can sign in at /login and change it.`; refreshMain(); },
-  async ad(fd) { await POST('/api/admin/ads', Object.fromEntries(fd)); S.ads = await GET('/api/ads'); toast('Advert created and live'); refreshMain(); },
+  async ad(fd, f) {
+    const body = { ...Object.fromEntries(fd), active: fd.has('active'), resetStats: fd.has('resetStats') };
+    if (f.dataset.id) { await PUT('/api/admin/ads/' + f.dataset.id, body); toast('Campaign updated'); }
+    else { await POST('/api/admin/ads', body); toast('Advert created'); }
+    S.editAd = null; S.ads = await GET('/api/ads'); refreshMain();
+  },
+  async adminProfile(fd, f) { await PUT('/api/admin/users/' + f.dataset.id, { profile: Object.fromEntries(fd) }); S.editUser = null; await reloadBoot(); toast('Profile updated'); refreshMain(); },
   async event(fd) { await POST('/api/admin/events', Object.fromEntries(fd)); S.sidebar = null; toast('Event added'); refreshMain(); },
   async weather(fd, f) {
     const cities = [...f.querySelectorAll('.wxrow')].map(tr => Object.fromEntries([...tr.querySelectorAll('[data-k]')].map(i => [i.dataset.k, i.value])));
@@ -591,22 +708,34 @@ const FORM = {
     await PUT('/api/admin/weather', { cities, alerts }); await reloadBoot(); toast('Weather updated'); refreshMain();
   },
   async breaking(fd) { await POST('/api/admin/breaking', { text: fd.get('text'), articleId: fd.get('articleId') || null }); await reloadBoot(); chime(); renderFlash(); toast('Breaking news is live'); refreshMain(); },
-  async settings(fd) { await PUT('/api/admin/settings', { tagline: fd.get('tagline'), flow: fd.get('flow'), moderate: !!fd.get('moderate') }); await reloadBoot(); toast('Settings saved'); refreshMain(); },
-  async profile(fd) { await PUT('/api/me', Object.fromEntries(fd)); await reloadBoot(); toast('Profile saved'); refreshMain(); },
+  async settings(fd) { const L = {}; ['imgMaxMB', 'imgMaxWidth', 'imgQuality', 'avatarSize', 'videoMaxMB', 'audioMaxMB'].forEach(k => L[k] = fd.get(k)); await PUT('/api/admin/settings', { tagline: fd.get('tagline'), flow: fd.get('flow'), moderate: !!fd.get('moderate'), limits: L }); await reloadBoot(); toast('Settings saved'); refreshMain(); },
+  async profile(fd) { await PUT('/api/me', Object.fromEntries(fd)); await reloadBoot(); toast('Profile saved'); renderTop(); refreshMain(); },
   async password(fd, f) { await POST('/api/auth/password', Object.fromEntries(fd)); f.reset(); toast('Password changed'); },
 };
+
+function setMenu(open) {
+  S.menuOpen = open;
+  const d = $('.drawer'); if (d) { d.classList.toggle('open', open); d.setAttribute('aria-hidden', open ? 'false' : 'true'); }
+  $('.burger')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  document.body.classList.toggle('menu-open', open);
+  if (open) setTimeout(() => $('.drawer-x')?.focus(), 50);
+}
 
 /* ---------------- uploads in forms ---------------- */
 async function onUpload(input) {
   const k = input.dataset.up, file = input.files[0]; if (!file) return;
-  const kind = k === 'cover' || k === 'adimg' ? 'image' : k === 'videoFile' ? 'video' : 'audio';
-  const prev = $('#' + k + 'Prev');
+  const kind = input.dataset.kind || (k === 'cover' ? 'image' : k === 'videoFile' ? 'video' : 'audio');
+  const L = S.boot.limits || {}, maxMB = kind === 'video' ? L.videoMaxMB : kind === 'audio' ? L.audioMaxMB : L.imgMaxMB;
+  const target = input.dataset.target, prev = $('#' + (target || k) + 'Prev');
+  if (maxMB && file.size > maxMB * 1e6) { prev.innerHTML = `<div class="err">${esc(file.name)} is ${(file.size / 1e6).toFixed(1)} MB — the limit is ${maxMB} MB. Please choose a smaller file.</div>`; input.value = ''; return; }
   prev.innerHTML = `<div class="hint">Uploading ${esc(file.name)}…</div><div class="progress"><i></i></div>`;
   input.disabled = true;
   try {
     const url = await uploadFile(file, kind, p => { const bar = prev.querySelector('.progress i'); if (bar) bar.style.width = Math.round(p * 100) + '%'; });
-    if (k === 'adimg') { $('#adimgUrl').value = url; prev.innerHTML = `<img src="${esc(url)}" alt="">`; }
-    else {
+    if (target) {
+      $('#' + target).value = url;
+      prev.innerHTML = `<img src="${esc(url)}" alt="" style="${kind === 'avatar' ? 'width:96px;height:96px;border-radius:50%;object-fit:cover' : ''}"><div class="hint">✓ Uploaded — click Save to keep it.</div>`;
+    } else {
       S.editing[k] = url; prev.innerHTML = prevHTML(k);
       if (k === 'videoFile') { const l = document.querySelector('[name=videoLink]'); if (l) l.value = ''; }
     }
@@ -661,6 +790,11 @@ document.addEventListener('change', async e => {
   if (t.dataset.ch === 'userRole') { try { await PUT('/api/admin/users/' + t.dataset.id, { role: t.value }); toast('Role updated'); } catch (x) { toast(x.message); } }
 });
 window.addEventListener('popstate', () => route());
+let fitT; window.addEventListener('resize', () => { clearTimeout(fitT); fitT = setTimeout(fitNav, 80); });
+document.fonts?.ready.then(fitNav);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { ACT.closeMenu(); $$('.nav-more.open').forEach(m => m.classList.remove('open')); } });
+document.addEventListener('click', e => { if (!e.target.closest('.nav-more')) $$('.nav-more.open').forEach(m => m.classList.remove('open')); }, true);
+document.addEventListener('input', e => { const c = e.target.dataset?.counter; if (c) { const el = $(`[data-count="${c}"]`); if (el) el.textContent = e.target.value.length + '/2000'; } });
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; renderTop(); });
 window.addEventListener('appinstalled', () => { S.installEvt = null; renderTop(); toast('Engineeria Africa installed'); });
 // play the chime on first interaction if a breaking story is live and unseen (browsers block sound before a tap)

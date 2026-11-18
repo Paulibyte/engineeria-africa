@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS push_subs (
 );
 `);
 
+// ---------- migrations (safe to run on every start) ----------
+const addCol = (table, col, def) => {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+};
+addCol('users', 'avatar', 'TEXT');
+addCol('users', 'headline', "TEXT DEFAULT ''");
+addCol('users', 'location', "TEXT DEFAULT ''");
+addCol('users', 'website', "TEXT DEFAULT ''");
+addCol('ads', 'starts_on', 'TEXT');
+
 // ---------- settings helpers ----------
 const getSetting = (k, d = null) => {
   const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k);
@@ -115,6 +126,9 @@ function seed() {
     setSetting('breaking', { active: false });
     setSetting('alerts', []);
   }
+  const DEFAULT_LIMITS = { imgMaxMB: 5, imgMaxWidth: 1600, imgQuality: 80, avatarSize: 400, videoMaxMB: 250, audioMaxMB: 40 };
+  if (getSetting('limits') === null) setSetting('limits', DEFAULT_LIMITS);
+  else setSetting('limits', { ...DEFAULT_LIMITS, ...getSetting('limits') });
   const count = db.prepare('SELECT COUNT(*) n FROM users').get().n;
   if (count === 0) {
     const email = process.env.ADMIN_EMAIL;
