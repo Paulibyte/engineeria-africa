@@ -146,6 +146,18 @@
         table: true,
         keyboard: {
           bindings: {
+            // Backspace just after a picture/video/audio first highlights it; pressing again deletes it
+            'media backspace': { key: 'Backspace', collapsed: true, offset: 0, handler(range) {
+              if (range.index === 0) return true;
+              const [prev] = quill.getLine(range.index - 1);
+              if (prev && prev.domNode.matches?.(MEDIA)) { selectMedia(prev); return false; }
+              return true;
+            } },
+            'media delete': { key: 'Delete', collapsed: true, suffix: /^$/, handler(range) {
+              const [next] = quill.getLine(range.index + 1);
+              if (next && next.domNode.matches?.(MEDIA)) { selectMedia(next); return false; }
+              return true;
+            } },
             'table tab': { key: 'Tab', shiftKey: null, format: ['table'], handler(range, ctx) { return moveCell(range, ctx.event.shiftKey ? -1 : 1); } },
           },
         },
@@ -218,36 +230,107 @@
       if (i + 1 >= quill.getLength() - 1) quill.insertText(i + 1, '\n', 'user');
       quill.setSelection(i + 1, 0, 'user');
     }
-    async function insertImage() {
-      const range = quill.getSelection(true);
-      const p = dialog('Insert image', `${uploadField('src', 'image/*', 'image', 'Upload an image')}
+    const sel = (v, opts2) => opts2.map(([k, l]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${l}</option>`).join('');
+    // existing = current values when editing an image that is already in the story
+    async function insertImage(existing, at) {
+      const range = at || quill.getSelection(true), e = existing || {};
+      const p = dialog(existing ? 'Edit image' : 'Insert image', `${uploadField('src', 'image/*', 'image', existing ? 'Replace with a new image (optional)' : 'Upload an image')}
+        ${existing ? `<div class="ea-dlg-prev"><img src="${escA(e.src)}" alt=""></div>` : ''}
         <label>…or paste an image link</label><input name="link" type="url" placeholder="https://">
-        <label>Caption (shown under the image)</label><input name="caption" maxlength="300" placeholder="e.g. The completed deck of the bridge, March 2027">
-        <label>Description for screen readers (alt text)</label><input name="alt" maxlength="200">
-        <div class="grid2"><div><label>Size</label><select name="size"><option value="full">Full width</option><option value="medium">Medium</option><option value="small">Small</option></select></div>
-        <div><label>Position</label><select name="align"><option value="">Centre</option><option value="left">Left, text wraps around</option><option value="right">Right, text wraps around</option></select></div></div>`);
+        <label>Caption (shown under the image)</label><input name="caption" maxlength="300" value="${escA(e.caption)}" placeholder="e.g. The completed deck of the bridge, March 2027">
+        <label>Description for screen readers (alt text)</label><input name="alt" maxlength="200" value="${escA(e.alt)}">
+        <div class="grid2"><div><label>Size</label><select name="size">${sel(e.size || 'full', [['full', 'Full width'], ['medium', 'Medium'], ['small', 'Small']])}</select></div>
+        <div><label>Position</label><select name="align">${sel(e.align || '', [['', 'Centre'], ['left', 'Left, text wraps around'], ['right', 'Right, text wraps around']])}</select></div></div>`, existing ? 'Save' : 'Insert');
       const form = dialog.last; wireUploads(form, opts);
-      form._validate = fd => (!fd.get('src') && !/^https:\/\//.test(fd.get('link') || '')) ? 'Upload an image or paste an https:// link.' : null;
+      form._validate = fd => (!fd.get('src') && !/^https:\/\//.test(fd.get('link') || '') && !existing) ? 'Upload an image or paste an https:// link.' : null;
       const v = await p; if (!v) return;
-      insertBlock('eafigure', { src: v.src || v.link, caption: v.caption, alt: v.alt || v.caption, size: v.size, align: v.align }, range);
+      const val = { src: v.src || v.link || e.src, caption: v.caption, alt: v.alt || v.caption, size: v.size, align: v.align };
+      existing ? replaceEmbed(range.index, 'eafigure', val) : insertBlock('eafigure', val, range);
     }
-    async function insertVideo() {
-      const range = quill.getSelection(true);
-      const p = dialog('Insert video', `<label>YouTube or Vimeo link</label><input name="link" type="url" placeholder="https://www.youtube.com/watch?v=…">
-        <div class="hint" style="margin:10px 0">or</div>${uploadField('file', 'video/mp4,video/webm,video/quicktime', 'video', 'Upload a video file (MP4 / WebM)')}`);
+    async function insertVideo(existing, at) {
+      const range = at || quill.getSelection(true);
+      const p = dialog(existing ? 'Replace video' : 'Insert video', `<label>YouTube or Vimeo link</label><input name="link" type="url" placeholder="https://www.youtube.com/watch?v=…">
+        <div class="hint" style="margin:10px 0">or</div>${uploadField('file', 'video/mp4,video/webm,video/quicktime', 'video', 'Upload a video file (MP4 / WebM)')}`, existing ? 'Save' : 'Insert');
       const form = dialog.last; wireUploads(form, opts);
       form._validate = fd => fd.get('file') || embedUrl(fd.get('link')) ? null : 'Paste a YouTube or Vimeo link, or upload a video file.';
       const v = await p; if (!v) return;
-      if (v.file) insertBlock('eafilevideo', v.file, range); else insertBlock('eavideo', embedUrl(v.link), range);
+      const [type, val] = v.file ? ['eafilevideo', v.file] : ['eavideo', embedUrl(v.link)];
+      existing ? replaceEmbed(range.index, type, val) : insertBlock(type, val, range);
     }
-    async function insertAudio() {
-      const range = quill.getSelection(true);
-      const p = dialog('Insert audio', `${uploadField('src', 'audio/*', 'audio', 'Upload an audio file (MP3, M4A, WAV…)')}<label>Title (optional)</label><input name="title" maxlength="120" placeholder="e.g. Interview with the project engineer">`);
+    async function insertAudio(existing, at) {
+      const range = at || quill.getSelection(true), e = existing || {};
+      const p = dialog(existing ? 'Edit audio' : 'Insert audio', `${uploadField('src', 'audio/*', 'audio', existing ? 'Replace the audio file (optional)' : 'Upload an audio file (MP3, M4A, WAV…)')}<label>Title (optional)</label><input name="title" maxlength="120" value="${escA(e.title)}" placeholder="e.g. Interview with the project engineer">`, existing ? 'Save' : 'Insert');
       const form = dialog.last; wireUploads(form, opts);
-      form._validate = fd => fd.get('src') ? null : 'Choose an audio file to upload.';
+      form._validate = fd => fd.get('src') || existing ? null : 'Choose an audio file to upload.';
       const v = await p; if (!v) return;
-      insertBlock('eaaudio', { src: v.src, title: v.title }, range);
+      const val = { src: v.src || e.src, title: v.title };
+      existing ? replaceEmbed(range.index, 'eaaudio', val) : insertBlock('eaaudio', val, range);
     }
+    function replaceEmbed(index, type, value) {
+      quill.deleteText(index, 1, 'user');
+      quill.insertEmbed(index, type, value, 'user');
+      selectMedia(quill.getLine(index)[0]);
+    }
+
+    /* ---------- click a picture / video / audio / divider to edit, move or delete it ---------- */
+    const MEDIA = '.ea-fig,.ea-embed,.ea-vfile,.ea-afile,hr';
+    const tools = document.createElement('div');
+    tools.className = 'ea-media-tools'; tools.hidden = true;
+    container.appendChild(tools);
+    let picked = null;
+    const pickedIndex = () => (picked && picked.domNode.isConnected ? quill.getIndex(picked) : -1);
+    function clearPick() { if (picked?.domNode) picked.domNode.classList.remove('ea-selected'); picked = null; tools.hidden = true; }
+    function placeTools() {
+      if (!picked || !picked.domNode.isConnected) return clearPick();
+      const cr = container.getBoundingClientRect(), nr = picked.domNode.getBoundingClientRect();
+      tools.style.top = Math.max(4, nr.top - cr.top + 8) + 'px';
+      tools.style.right = Math.max(4, cr.right - nr.right + 8) + 'px';
+    }
+    function selectMedia(blot) {
+      if (!blot || !blot.domNode || !blot.domNode.matches?.(MEDIA)) return;
+      clearPick();
+      picked = blot; blot.domNode.classList.add('ea-selected');
+      const n = blot.domNode, editable = n.matches('.ea-fig,.ea-embed,.ea-vfile,.ea-afile'), i = quill.getIndex(blot);
+      tools.innerHTML = `${editable ? `<button type="button" data-m="edit" title="Edit">✎ Edit</button>` : ''}<button type="button" data-m="up" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" data-m="down" title="Move down">↓</button><button type="button" data-m="del" class="del" title="Delete (or press Delete / Backspace)">🗑 Delete</button>`;
+      tools.hidden = false; placeTools();
+      quill.setSelection(i, 1, 'silent');   // Backspace / Delete now remove it
+    }
+    quill.root.addEventListener('click', e => {
+      const n = e.target.closest?.(MEDIA);
+      if (n && quill.root.contains(n)) { e.preventDefault(); selectMedia(Q.find(n)); quill.focus(); quill.setSelection(quill.getIndex(picked), 1, 'silent'); }
+    });
+    tools.addEventListener('mousedown', e => e.preventDefault());
+    tools.addEventListener('click', async e => {
+      const b = e.target.closest('[data-m]'); if (!b || !picked) return;
+      const i = pickedIndex(); if (i < 0) return clearPick();
+      const n = picked.domNode, m = b.dataset.m;
+      if (m === 'del') { clearPick(); quill.deleteText(i, 1, 'user'); quill.setSelection(Math.min(i, quill.getLength() - 1), 0, 'user'); return; }
+      if (m === 'edit') {
+        const at = { index: i, length: 0 };
+        if (n.matches('.ea-fig')) return insertImage(Figure.value(n), at);
+        if (n.matches('.ea-afile')) return insertAudio(FileAudio.value(n), at);
+        return insertVideo(true, at);
+      }
+      const value = Object.values(picked.value ? picked.value() : {})[0], type = picked.statics.blotName;
+      if (m === 'up') {
+        if (i === 0) return;
+        const [prev] = quill.getLine(i - 1); const target = quill.getIndex(prev);
+        quill.deleteText(i, 1, 'user'); quill.insertEmbed(target, type, value, 'user');
+        selectMedia(quill.getLine(target)[0]);
+      } else {
+        const [next] = quill.getLine(i + 1); if (!next || i + 1 >= quill.getLength() - 1) return;
+        quill.deleteText(i, 1, 'user');
+        const target = quill.getIndex(next) + next.length();
+        quill.insertEmbed(target, type, value, 'user');
+        selectMedia(quill.getLine(target)[0]);
+      }
+    });
+    quill.on('editor-change', () => {
+      if (!picked) return;
+      const r = quill.getSelection(), i = pickedIndex();
+      if (i < 0 || !r || r.index !== i || r.length !== 1) clearPick(); else placeTools();
+    });
+    window.addEventListener('resize', () => picked && placeTools());
 
     // table tools appear when the cursor is inside a table
     const tbar = container.querySelector('.ea-table-bar'), tmod = quill.getModule('table');
@@ -260,6 +343,7 @@
       tbar.hidden = !(r && quill.getFormat(r).table);
     });
 
+    quill.root.classList.add('ea-body');  // show pictures, captions, sizes and tables exactly as readers will see them
     // load content
     if (html) quill.clipboard.dangerouslyPasteHTML(html, 'silent');
     quill.history.clear();

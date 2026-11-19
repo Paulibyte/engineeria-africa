@@ -353,3 +353,15 @@ body.ea-full-open{overflow:hidden}
 .ea-body .ad a{text-decoration:none;color:#fff}
 .ea-body .ad h4{text-transform:none;letter-spacing:0;font-size:19px;margin:0}
 .ea-body .ad .cta{color:#111}
+
+.story-editor .ql-editor .ea-selected{outline:3px solid var(--accent)!important;outline-offset:3px}
+.story-editor .ql-editor hr{cursor:pointer;padding:6px 0;background-clip:content-box}
+.ea-media-tools{position:absolute;z-index:7;display:flex;gap:4px;background:var(--ink);padding:5px;border-radius:9px;box-shadow:0 6px 20px rgba(0,0,0,.3)}
+.ea-media-tools[hidden]{display:none}
+.ea-media-tools button{background:rgba(255,255,255,.12);color:#fff;border:0;border-radius:6px;padding:6px 10px;font:600 13px 'IBM Plex Sans',system-ui,sans-serif;cursor:pointer}
+.ea-media-tools button:hover{background:rgba(255,255,255,.25)}
+.ea-media-tools button:disabled{opacity:.35;cursor:default}
+.ea-media-tools button.del{background:#d7263d}
+
+.story-editor .ea-selected::selection,.story-editor .ea-selected *::selection{background:transparent}
+.story-editor .ql-editor figure.ea-fig{margin:1.2em auto}

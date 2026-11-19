@@ -554,7 +554,7 @@ async function viewWrite(id) {
     <label>Summary / standfirst</label><input name="excerpt" required maxlength="300" value="${esc(e.excerpt)}">
     <label>Story</label><div id="restoreNote"></div>
     <div id="storyEditor" class="story-editor"><div class="loading" style="padding:40px 0">Loading the editor…</div></div>
-    <div class="hint">Tip: use the toolbar to add headings, images with captions, videos, audio clips, tables and dividers anywhere in the story. You can also drag a photo straight into the text.</div>
+    <div class="hint">Tip: use the toolbar to add headings, images with captions, videos, audio clips, tables and dividers anywhere in the story. You can also drag a photo straight into the text. <b>Click any picture, video or audio in the story to edit, move or delete it</b> (or press Delete / Backspace while it is highlighted).</div>
     ${H2('Featured media (top of the story)')}
     <label style="margin-top:0">Featured image (JPG/PNG/WebP, up to ${S.boot.limits.imgMaxMB} MB)</label><input type="file" accept="image/*" data-up="cover"><div class="prev" id="coverPrev">${prevHTML('cover')}</div>
     <label>Video — paste a YouTube / Vimeo link</label><input name="videoLink" type="url" placeholder="https://www.youtube.com/watch?v=…" value="${esc(e.videoLink || '')}">
@@ -592,7 +592,7 @@ function htmlToText(h) { const d = document.createElement('div'); d.innerHTML = 
 async function initEditor() {
   const el = $('#storyEditor'); if (!el || !S.editing) return;
   await Promise.all([loadAsset('/vendor/quill/quill.snow.css?v=2.0.3'), loadAsset('/vendor/quill/quill.js?v=2.0.3')]);
-  await loadAsset('/editor.js?v=8');
+  await loadAsset('/editor.js?v=11');
   const e = S.editing;
   const start = e.bodyFormat === 'html' ? e.body : fmtBody(e.body).join('');
   let saveT;
