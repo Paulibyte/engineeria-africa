@@ -1,6 +1,6 @@
 // Engineeria Africa service worker — offline reading + breaking-news push alerts
-const VERSION = 'ea-v4';
-const SHELL = ['/', '/app.js?v=4', '/styles.css?v=4', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/badge-72.png'];
+const VERSION = 'ea-v5';
+const SHELL = ['/', '/app.js?v=5', '/styles.css?v=5', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/badge-72.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION + '-shell').then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

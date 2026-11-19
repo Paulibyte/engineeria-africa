@@ -264,7 +264,8 @@ async function viewArticle(slug) {
   const a = d.article, c = cat(a.category), au = d.author;
   S.current = a;
   document.title = a.title + ' — Engineeria Africa';
-  const paras = fmtBody(a.body); if (paras.length > 2) paras.splice(2, 0, adSlot('inline'));
+  const isHtml = a.bodyFormat === 'html';
+  const paras = isHtml ? [a.body] : fmtBody(a.body); if (!isHtml && paras.length > 2) paras.splice(2, 0, adSlot('inline'));
   return `<div class="wrap layout"><article class="article">
    ${a.status !== 'published' ? `<div class="note"><b>Preview</b> — status: <span class="pill s-${a.status}">${a.status}</span>${a.editorNote ? ` · Editor note: ${esc(a.editorNote)}` : ''}</div>` : ''}
    <div class="crumb"><a href="/">Home</a> › <a href="/section/${c.id}" style="color:${c.color};font-weight:700">${c.name}</a></div>
@@ -274,7 +275,7 @@ async function viewArticle(slug) {
    <figure class="figure"><img src="${coverOf(a)}" alt=""></figure>
    ${videoBlock(a.video)}
    ${a.audio ? `<div class="audio-box"><b>🎙 Audio report</b><audio controls preload="none" src="${esc(a.audio)}"></audio></div>` : ''}
-   <div class="prose">${paras.join('')}</div>
+   <div class="prose ea-body${isHtml ? ' ea-rich' : ''}">${paras.join('')}</div>
    ${a.tags ? `<p>${a.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<a class="chip" href="/search?q=${encodeURIComponent(t)}"># ${esc(t)}</a>`).join('')}</p>` : ''}
    <div class="toolrow" style="border-top:1px solid var(--line);padding-top:14px"><b>Share this story</b><span class="sp"></span>${shareBar(a)}</div>
    ${au ? `<div class="author-box">${avatar(au.name, au.color, au.avatar, 72)}<div><div class="meta" style="text-transform:uppercase;letter-spacing:.08em;font-size:11px">About the author</div><b style="font-size:17px">${esc(au.name)}</b> ${tierBadge(au.tier)}${au.headline ? `<div class="meta">${esc(au.headline)}</div>` : ''}${au.bio ? `<p class="clamp3">${esc(au.bio)}</p>` : ''}<a href="/author/${au.id}" style="color:var(--accent);font-weight:600;font-size:14px">View profile & all stories →</a></div></div>` : ''}
@@ -291,7 +292,14 @@ async function viewArticle(slug) {
   </article>${sidebar(sb)}</div>`;
 }
 function afterArticle() {
-  const a = S.current; if (!a || a.status !== 'published') return;
+  const a = S.current; if (!a) return;
+  if (a.bodyFormat === 'html') {  // place the in-article advert after the second paragraph
+    const ps = $$('.ea-rich > p').filter(p => p.textContent.trim().length > 40);
+    const at = ps[1] || ps[0];
+    if (at && ps.length > 2) { at.insertAdjacentHTML('afterend', adSlot('inline')); flushAds(); }
+    $$('.ea-rich table').forEach(t => { if (!t.parentElement.classList.contains('ea-tablewrap')) { const w = document.createElement('div'); w.className = 'ea-tablewrap'; t.replaceWith(w); w.appendChild(t); } });
+  }
+  if (a.status !== 'published') return;
   const k = 'ea_v_' + a.id;
   try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, 1); } catch { }
   POST(`/api/articles/${a.id}/view`).catch(() => { });
@@ -544,9 +552,10 @@ async function viewWrite(id) {
     <label style="margin-top:0">Headline</label><input name="title" required maxlength="160" value="${esc(e.title)}" placeholder="Clear, specific headline">
     <div class="grid2"><div><label>Section</label><select name="category">${S.boot.cats.map(c => `<option value="${c.id}" ${e.category === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}</select></div><div><label>Tags (comma separated)</label><input name="tags" value="${esc(e.tags)}" placeholder="roads, geotechnics"></div></div>
     <label>Summary / standfirst</label><input name="excerpt" required maxlength="300" value="${esc(e.excerpt)}">
-    <label>Story</label><textarea name="body" required style="min-height:300px" placeholder="Separate paragraphs with a blank line. Use ## for a sub-heading, > for a quote and **bold** for emphasis.">${esc(e.body)}</textarea>
-    <div class="hint">Formatting: blank line = new paragraph · ## Sub-heading · > Quote · **bold**</div>
-    ${H2('Media')}
+    <label>Story</label><div id="restoreNote"></div>
+    <div id="storyEditor" class="story-editor"><div class="loading" style="padding:40px 0">Loading the editor…</div></div>
+    <div class="hint">Tip: use the toolbar to add headings, images with captions, videos, audio clips, tables and dividers anywhere in the story. You can also drag a photo straight into the text.</div>
+    ${H2('Featured media (top of the story)')}
     <label style="margin-top:0">Featured image (JPG/PNG/WebP, up to ${S.boot.limits.imgMaxMB} MB)</label><input type="file" accept="image/*" data-up="cover"><div class="prev" id="coverPrev">${prevHTML('cover')}</div>
     <label>Video — paste a YouTube / Vimeo link</label><input name="videoLink" type="url" placeholder="https://www.youtube.com/watch?v=…" value="${esc(e.videoLink || '')}">
     <label>…or upload a video file (MP4/WebM, up to ${S.boot.limits.videoMaxMB} MB)</label><input type="file" accept="video/mp4,video/webm,video/quicktime" data-up="videoFile"><div class="prev" id="videoFilePrev">${prevHTML('videoFile')}</div>
@@ -568,6 +577,39 @@ function prevHTML(k) {
   return '';
 }
 
+/* ---------------- rich editor ---------------- */
+const loaded = {};
+function loadAsset(src) {
+  if (loaded[src]) return loaded[src];
+  return loaded[src] = new Promise((res, rej) => {
+    const el = /\.css(\?|$)/.test(src) ? Object.assign(document.createElement('link'), { rel: 'stylesheet', href: src }) : Object.assign(document.createElement('script'), { src });
+    el.onload = res; el.onerror = () => { delete loaded[src]; rej(new Error('Could not load the editor — check your connection')); };
+    document.head.appendChild(el);
+  });
+}
+const draftKey = () => 'ea_draft_' + (S.editing?._key || 'new');
+function htmlToText(h) { const d = document.createElement('div'); d.innerHTML = h; return d.textContent || ''; }
+async function initEditor() {
+  const el = $('#storyEditor'); if (!el || !S.editing) return;
+  await Promise.all([loadAsset('/vendor/quill/quill.snow.css?v=2.0.3'), loadAsset('/vendor/quill/quill.js?v=2.0.3')]);
+  await loadAsset('/editor.js?v=8');
+  const e = S.editing;
+  const start = e.bodyFormat === 'html' ? e.body : fmtBody(e.body).join('');
+  let saveT;
+  S.editor = EAEditor.create(el, start, {
+    upload: uploadFile, limits: S.boot.limits, toast,
+    onChange() {
+      clearTimeout(saveT);
+      saveT = setTimeout(() => { try { localStorage.setItem(draftKey(), JSON.stringify({ html: S.editor.getHTML(), title: $('[name=title]')?.value || '', at: Date.now() })); } catch { } }, 1500);
+    },
+  });
+  // offer to restore unsaved work from this browser
+  let saved = null; try { saved = JSON.parse(localStorage.getItem(draftKey())); } catch { }
+  if (saved && saved.html && saved.html !== S.editor.getHTML()) {
+    $('#restoreNote').innerHTML = `<div class="note">You have unsaved changes to this story from ${timeAgo(saved.at)} on this device. <button type="button" class="btn sm" data-act="restoreDraft">Restore them</button> <button type="button" class="btn sm" data-act="discardDraft">Discard</button></div>`;
+  }
+}
+
 /* ================= ROUTER ================= */
 function go(path, replace) {
   if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path);
@@ -576,7 +618,7 @@ function go(path, replace) {
 async function route(opts = {}) {
   const id = ++S.routeId, path = location.pathname.replace(/\/+$/, '') || '/', q = new URLSearchParams(location.search);
   if (S.speaking) { speechSynthesis.cancel(); S.speaking = null; }
-  if (!path.startsWith('/write')) S.editing = null;
+  if (!path.startsWith('/write')) { S.editing = null; S.editor = null; document.body.classList.remove('ea-full-open'); }
   S.confirmKey = null; S.current = null; S.shownAds = []; S.menuOpen = false;
   document.title = 'Engineeria Africa — Engineering News & Magazine';
   renderTop();
@@ -606,6 +648,7 @@ async function route(opts = {}) {
   renderTop(); // ticker may have loaded
   flushAds();
   if (path.startsWith('/article/')) afterArticle();
+  if (path.startsWith('/write')) initEditor().catch(err => { const el = $('#storyEditor'); if (el) el.innerHTML = `<div class="err">${esc(err.message)}</div>`; });
 }
 async function refreshMain() { const y = scrollY; await route({ silent: true }); scrollTo(0, y); }
 
@@ -626,7 +669,7 @@ const ACT = {
   closeTip() { $('#tip').innerHTML = ''; },
   async logout() { await POST('/api/auth/logout'); await reloadBoot(); S.dashTab = null; go('/'); toast('Signed out'); },
   bulletin() { const items = S.ticker || []; speak('Engineeria Africa news bulletin. ' + items.slice(0, 5).map((a, i) => `Story ${i + 1}. ${a.title}. ${a.excerpt}`).join(' ') + ' That is the bulletin. Read more on Engineeria Africa.', 'bulletin'); },
-  listen(id) { const a = S.current; if (!a) return; speak(`${a.title}. By ${a.authorName}. ${a.body.replace(/^## |^> /gm, '').replace(/\*\*/g, '')}`, String(id)); },
+  listen(id) { const a = S.current; if (!a) return; const text = a.bodyFormat === 'html' ? htmlToText(a.body.replace(/<\/(p|h2|h3|h4|li|blockquote|figcaption)>/g, '. </$1>')) : a.body.replace(/^## |^> /gm, '').replace(/\*\*/g, ''); speak(`${a.title}. By ${a.authorName}. ${text}`, String(id)); },
   async copy(slug) { const url = location.origin + '/article/' + slug; try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { toast(url); } },
   nativeShare(slug) { const a = S.current; navigator.share({ title: a?.title, text: a?.excerpt, url: location.origin + '/article/' + slug }).catch(() => { }); },
   playAlert() { chime(true); },
@@ -673,6 +716,8 @@ const ACT = {
   adCancel() { S.editAd = null; refreshMain(); },
   rmMedia(k) { S.editing[k] = null; $('#' + k + 'Prev').innerHTML = prevHTML(k); },
   cancelEdit() { S.editing = null; },
+  restoreDraft() { let d = null; try { d = JSON.parse(localStorage.getItem(draftKey())); } catch { } if (d && S.editor) { S.editor.setHTML(d.html); if (d.title && $('[name=title]')) $('[name=title]').value = d.title; } $('#restoreNote').innerHTML = ''; toast('Unsaved changes restored'); },
+  discardDraft() { try { localStorage.removeItem(draftKey()); } catch { } $('#restoreNote').innerHTML = ''; },
 };
 const FORM = {
   search(fd) { const q = String(fd.get('q') || '').trim(); if (q) go('/search?q=' + encodeURIComponent(q)); },
@@ -685,9 +730,13 @@ const FORM = {
   },
   async article(fd, f, sub) {
     const e = S.editing, action = sub?.value || 'draft';
-    const body = { title: fd.get('title'), excerpt: fd.get('excerpt'), body: fd.get('body'), category: fd.get('category'), tags: fd.get('tags'), videoLink: fd.get('videoLink'), cover: e.cover, audio: e.audio, videoFile: e.videoFile, action };
+    if (!S.editor) throw new Error('The editor is still loading — please wait a moment.');
+    const story = S.editor.getHTML();
+    if (action !== 'draft' && !htmlToText(story).trim() && !/<(img|iframe|video|audio)/.test(story)) throw new Error('Write the story before submitting or publishing.');
+    const body = { title: fd.get('title'), excerpt: fd.get('excerpt'), body: story, bodyFormat: 'html', category: fd.get('category'), tags: fd.get('tags'), videoLink: fd.get('videoLink'), cover: e.cover, audio: e.audio, videoFile: e.videoFile, action };
     const r = e.id ? await PUT('/api/articles/' + e.id, body) : await POST('/api/articles', body);
-    S.editing = null; S.sidebar = null;
+    try { localStorage.removeItem(draftKey()); } catch { }
+    S.editing = null; S.editor = null; S.sidebar = null;
     S.dashTab = role() === 'contributor' ? 'mine' : (staff() ? 'articles' : null);
     toast({ draft: 'Draft saved', submit: 'Submitted to the Editor-in-Chief', publish: r.status === 'published' ? 'Published ✓' : 'Approved — awaiting Admin', save: 'Changes saved' }[action]);
     if (r.status === 'published') await reloadBoot();

@@ -13,6 +13,7 @@ const bcrypt = require('bcryptjs');
 const multer = require('multer');
 const { db, getSetting, setSetting } = require('./db');
 const { startWeather, refreshWeather, pushAll, pushReady } = require('./lib/services');
+const sanitizeHtml = require('sanitize-html');
 let sharp = null; try { sharp = require('sharp'); } catch { /* optional */ }
 
 const PORT = +process.env.PORT || 4100;
@@ -56,7 +57,7 @@ app.use(helmet({
   hsts: PROD,
 }));
 app.use(compression());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '3mb' }));
 app.use(cookieParser());
 
 /* ---------------- helpers ---------------- */
@@ -93,6 +94,33 @@ const isStaff = u => u && (u.role === 'admin' || u.role === 'eic');
 const limits = () => getSetting('limits', {});
 const LIMIT_RULES = { imgMaxMB: [0.1, 50], imgMaxWidth: [200, 6000], imgQuality: [40, 100], avatarSize: [100, 1000], videoMaxMB: [1, 2048], audioMaxMB: [1, 500] };
 
+/* ---------------- story HTML sanitising ---------------- */
+const COLOR = [/^#[0-9a-f]{3,8}$/i, /^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(,\s*[\d.]+\s*)?\)$/];
+const SAFE_HTML = {
+  allowedTags: ['p', 'br', 'h2', 'h3', 'h4', 'strong', 'b', 'em', 'i', 'u', 's', 'sub', 'sup', 'a', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+    'span', 'figure', 'figcaption', 'img', 'div', 'iframe', 'video', 'audio', 'hr', 'table', 'thead', 'tbody', 'tr', 'td', 'th'],
+  allowedAttributes: {
+    a: ['href', 'target', 'rel'], img: ['src', 'alt', 'loading'], iframe: ['src', 'allowfullscreen', 'frameborder', 'allow', 'referrerpolicy'],
+    video: ['src', 'controls', 'preload', 'playsinline'], audio: ['src', 'controls', 'preload'], li: ['data-list'], td: ['data-row', 'colspan', 'rowspan'],
+    th: ['colspan', 'rowspan'], pre: ['data-language'], '*': ['class', 'style'],
+  },
+  allowedClasses: { '*': [/^ql-(align|indent|size|direction)-[\w-]+$/, 'ql-syntax', 'ql-code-block', 'ql-code-block-container', /^ea-[\w-]+$/] },
+  allowedStyles: { '*': { color: COLOR, 'background-color': COLOR, 'text-align': [/^(left|right|center|justify)$/] } },
+  allowedSchemes: ['http', 'https', 'mailto'],
+  allowedIframeHostnames: ['www.youtube.com', 'youtube.com', 'www.youtube-nocookie.com', 'player.vimeo.com'],
+  allowedIframeDomains: [],
+  transformTags: {
+    a: (tag, attr) => ({ tagName: 'a', attribs: /^https?:\/\//i.test(attr.href || '') && !(attr.href || '').startsWith(SITE_URL) ? { ...attr, target: '_blank', rel: 'noopener' } : { href: attr.href || '#' } }),
+    iframe: (tag, attr) => ({ tagName: 'iframe', attribs: { ...attr, referrerpolicy: 'strict-origin-when-cross-origin', allowfullscreen: 'true', frameborder: '0' } }),
+    video: (tag, attr) => ({ tagName: 'video', attribs: localUrl(attr.src) ? { src: attr.src, controls: '', preload: 'metadata', playsinline: '' } : {} }),
+    audio: (tag, attr) => ({ tagName: 'audio', attribs: localUrl(attr.src) ? { src: attr.src, controls: '', preload: 'none' } : {} }),
+    img: (tag, attr) => ({ tagName: 'img', attribs: (localUrl(attr.src) || /^https:\/\//.test(attr.src || '')) ? { src: attr.src, alt: attr.alt || '', loading: 'lazy' } : {} }),
+  },
+  exclusiveFilter: f => ((f.tag === 'img' || f.tag === 'iframe') && !f.attribs.src) || ((f.tag === 'video' || f.tag === 'audio') && !f.attribs.src),
+};
+const cleanStory = html => sanitizeHtml(String(html || ''), SAFE_HTML).slice(0, 400000);
+const plainText = s => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&[a-z]+;/g, ' ');
+
 /* ---------------- article shaping ---------------- */
 const ART_SELECT = `SELECT a.*, u.name AS author_name, u.color AS author_color, u.avatar AS author_avatar, u.headline AS author_headline,
   (SELECT COUNT(*) FROM comments c WHERE c.article_id=a.id AND c.status='approved') AS comment_count,
@@ -108,7 +136,8 @@ function out(a, full = false) {
     status: a.status, featured: !!a.featured, breaking: !!a.breaking, views: a.views,
     comments: a.comment_count || 0, rating: a.rating || 0, ratingN: a.rating_n || 0,
     createdAt: a.created_at, publishedAt: a.published_at, submittedAt: a.submitted_at, editorNote: a.editor_note,
-    readTime: Math.max(1, Math.round((a.body || '').split(/\s+/).length / 200)),
+    readTime: Math.max(1, Math.round(plainText(a.body).split(/\s+/).filter(Boolean).length / 200)),
+    bodyFormat: a.body_format || 'text',
   };
   if (full) o.body = a.body;
   return o;
@@ -346,7 +375,8 @@ function articleFields(b) {
   const vlink = str(b.videoLink, 500);
   const vfile = localUrl(b.videoFile);
   return {
-    title: str(b.title, 160), excerpt: str(b.excerpt, 300), body: str(b.body, 60000),
+    title: str(b.title, 160), excerpt: str(b.excerpt, 300),
+    body: b.bodyFormat === 'html' ? cleanStory(b.body) : str(b.body, 60000), body_format: b.bodyFormat === 'html' ? 'html' : 'text',
     category: CAT_IDS.includes(b.category) ? b.category : 'civil', tags: str(b.tags, 200),
     cover: localUrl(b.cover), audio: localUrl(b.audio),
     video_type: vlink && isUrl(vlink) ? 'link' : vfile ? 'file' : null,
@@ -373,8 +403,8 @@ app.post('/api/articles', need(), (req, res) => {
   if (!f.title) return bad(res, 'A headline is required');
   const action = req.body.action, t = now();
   const status = action === 'submit' ? 'submitted' : 'draft';
-  const r = db.prepare(`INSERT INTO articles(slug,title,excerpt,body,category,tags,cover,video_type,video_src,audio,author_id,status,created_at,updated_at,submitted_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run('tmp-' + crypto.randomBytes(6).toString('hex'), f.title, f.excerpt, f.body, f.category, f.tags, f.cover, f.video_type, f.video_src, f.audio, req.user.id, status, t, t, status === 'submitted' ? t : null);
+  const r = db.prepare(`INSERT INTO articles(slug,title,excerpt,body,body_format,category,tags,cover,video_type,video_src,audio,author_id,status,created_at,updated_at,submitted_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run('tmp-' + crypto.randomBytes(6).toString('hex'), f.title, f.excerpt, f.body, f.body_format, f.category, f.tags, f.cover, f.video_type, f.video_src, f.audio, req.user.id, status, t, t, status === 'submitted' ? t : null);
   const id = r.lastInsertRowid;
   db.prepare('UPDATE articles SET slug=? WHERE id=?').run(slugify(f.title) + '-' + id, id);
   let final = status;
@@ -393,9 +423,9 @@ app.put('/api/articles/:id', need(), (req, res) => {
   let status = a.status;
   if (action === 'draft' && a.status !== 'published') status = 'draft';
   if (action === 'submit') status = 'submitted';
-  db.prepare(`UPDATE articles SET title=?,excerpt=?,body=?,category=?,tags=?,cover=?,video_type=?,video_src=?,audio=?,status=?,updated_at=?,
+  db.prepare(`UPDATE articles SET title=?,excerpt=?,body=?,body_format=?,category=?,tags=?,cover=?,video_type=?,video_src=?,audio=?,status=?,updated_at=?,
     submitted_at=CASE WHEN ?='submitted' THEN ? ELSE submitted_at END WHERE id=?`)
-    .run(f.title, f.excerpt, f.body, f.category, f.tags, f.cover, f.video_type, f.video_src, f.audio, status, t, status, t, a.id);
+    .run(f.title, f.excerpt, f.body, f.body_format, f.category, f.tags, f.cover, f.video_type, f.video_src, f.audio, status, t, status, t, a.id);
   if (a.status !== 'published') db.prepare('UPDATE articles SET slug=? WHERE id=?').run(slugify(f.title) + '-' + a.id, a.id);
   if (action === 'publish' && staff) status = applyPublish(req.user, db.prepare('SELECT * FROM articles WHERE id=?').get(a.id));
   res.json({ ok: true, id: a.id, status });

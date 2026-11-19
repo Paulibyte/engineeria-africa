@@ -106,6 +106,7 @@ addCol('users', 'headline', "TEXT DEFAULT ''");
 addCol('users', 'location', "TEXT DEFAULT ''");
 addCol('users', 'website', "TEXT DEFAULT ''");
 addCol('ads', 'starts_on', 'TEXT');
+addCol('articles', 'body_format', "TEXT DEFAULT 'text'");
 
 // ---------- settings helpers ----------
 const getSetting = (k, d = null) => {
